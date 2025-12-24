@@ -1,446 +1,222 @@
-// ====================================================
-// Fog Plugin for Lampa (CUB)
-// Based on snow_new.js structure and integration
-// ====================================================
-(function() {
-    'use strict';
+// Туман эффект
+window.addEventListener('DOMContentLoaded', () => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+    let animationId;
     
-    // Проверка на повторную загрузку
-    if (window.fog_plugin_loaded) return;
-    window.fog_plugin_loaded = true;
+    // Настройки тумана
+    const fogSettings = {
+        particleCount: 150,    // Количество частиц тумана
+        maxParticles: 200,    // Максимальное количество частиц
+        particleSize: 80,     // Размер частиц тумана
+        speed: 0.3,          // Скорость движения
+        opacity: 0.05,       // Прозрачность тумана
+        color: '#e8f4ff',    // Цвет тумана (голубовато-белый)
+        wind: 0.1,           // Направление ветра
+        turbulence: 0.3,     // Турбулентность
+        layers: 3,           // Количество слоев тумана
+        density: 0.7         // Плотность тумана
+    };
     
-    console.log('Fog Plugin: loading...');
-    
-    // ===== КОНСТАНТЫ =====
-    const PLUGIN_NAME = 'fog_plugin';
-    const STORAGE_KEY = 'fog_enabled';
-    const DEFAULT_ENABLED = false; // По умолчанию выключен
-    
-    // ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
-    // Взяты из snow_new.js
-    function isTizen() {
-        return navigator.userAgent.toLowerCase().indexOf('tizen') > -1 ||
-               navigator.userAgent.toLowerCase().indexOf('samsung') > -1 ||
-               /SmartHub|Tizen|Samsung/i.test(navigator.userAgent);
+    // Инициализация canvas
+    function initCanvas() {
+        canvas.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 9999;
+        `;
+        document.body.appendChild(canvas);
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
     }
     
-    function isAndroid() {
-        return /Android/i.test(navigator.userAgent) && !isTizen();
+    // Изменение размера canvas
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        initParticles();
     }
     
-    function isDesktop() {
-        return !isTizen() && !isAndroid();
-    }
-    
-    function storageGet(key, def) {
-        try {
-            var val = localStorage.getItem(key);
-            return val === null ? def : JSON.parse(val);
-        } catch(e) {
-            return def;
-        }
-    }
-    
-    function storageSet(key, val) {
-        try {
-            localStorage.setItem(key, JSON.stringify(val));
-        } catch(e) {}
-    }
-    
-    function num(v, def) {
-        v = parseInt(v);
-        return isNaN(v) ? def : v;
-    }
-    
-    // ===== ДЕТЕКТОР АКТИВНОСТИ =====
-    // Определяем, на каком экране находимся
-    var ALLOWED_COMPONENTS = {
-        'main': true,
-        'cub': true,
-        'home': true,
-        'favorite': true,
-        'search': true,
-        'movie': true,
-        'tv': true
-    };
-    
-    function isAllowedActivity(e) {
-        return !!(ALLOWED_COMPONENTS[e.component] || 
-                 (e.component === 'full' && ALLOWED_COMPONENTS[e.params.source]));
-    }
-    
-    // ===== ОСНОВНОЙ КЛАСС ТУМАНА =====
-    var Fog = function() {
-        this.canvas = null;
-        this.ctx = null;
-        this.particles = [];
-        this.animationId = 0;
-        this.width = 0;
-        this.height = 0;
-        this.lastTime = 0;
-        this.platform = isTizen() ? 'tizen' : isAndroid() ? 'android' : 'desktop';
-        this.settings = {
-            enabled: false,
-            density: 0,
-            speed: 0,
-            size: 0
-        };
-    };
-    
-    Fog.prototype.init = function() {
-        if (this.canvas) return;
-        
-        this.canvas = document.createElement('canvas');
-        this.canvas.className = 'fog-canvas';
-        this.canvas.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:9998; opacity:1;';
-        document.body.appendChild(this.canvas);
-        
-        this.ctx = this.canvas.getContext('2d');
-        this.resize();
-        window.addEventListener('resize', this.resize.bind(this));
-    };
-    
-    Fog.prototype.resize = function() {
-        this.width = this.canvas.width = window.innerWidth;
-        this.height = this.canvas.height = window.innerHeight;
-        this.resetParticles(true);
-    };
-    
-    Fog.prototype.resetParticles = function(keepExisting) {
-        var count = this.getParticleCount();
-        
-        if (keepExisting && this.particles.length === count) return;
-        
-        this.particles = [];
-        for (var i = 0; i < count; i++) {
-            this.particles.push({
-                x: Math.random() * this.width,
-                y: Math.random() * this.height,
-                z: Math.random() * 0.5 + 0.5, // 0.5 - 1.0
-                size: 0,
-                speedX: (Math.random() - 0.5) * 0.3,
-                speedY: (Math.random() - 0.5) * 0.2,
-                opacity: 0.1 + Math.random() * 0.15,
-                drift: Math.random() * 0.05,
-                driftSeed: Math.random() * 100
-            });
-        }
-        this.updateParticleParams();
-    };
-    
-    Fog.prototype.getParticleCount = function() {
-        var density = this.settings.density;
-        var platform = this.platform;
-        
-        if (platform === 'tizen') return 20;
-        if (platform === 'android') {
-            if (density === 1) return 25;
-            if (density === 2) return 40;
-            if (density === 3) return 60;
-            return 40; // auto
-        }
-        // desktop
-        if (density === 1) return 35;
-        if (density === 2) return 55;
-        if (density === 3) return 80;
-        return 55; // auto
-    };
-    
-    Fog.prototype.updateParticleParams = function() {
-        var sizeMultiplier = this.settings.size === 1 ? 0.7 : 
-                            this.settings.size === 2 ? 1.0 : 
-                            this.settings.size === 3 ? 1.4 : 1.0;
-        
-        var speedMultiplier = this.settings.speed === 1 ? 0.6 :
-                             this.settings.speed === 2 ? 1.0 :
-                             this.settings.speed === 3 ? 1.5 : 1.0;
-        
-        for (var i = 0; i < this.particles.length; i++) {
-            var p = this.particles[i];
-            p.size = 60 * p.z * sizeMultiplier;
-            p.speedX *= speedMultiplier;
-            p.speedY *= speedMultiplier;
-        }
-    };
-    
-    Fog.prototype.animate = function(time) {
-        if (!this.lastTime) this.lastTime = time;
-        var delta = Math.min(50, time - this.lastTime) / 1000;
-        this.lastTime = time;
-        
-        this.ctx.clearRect(0, 0, this.width, this.height);
-        
-        for (var i = 0; i < this.particles.length; i++) {
-            var p = this.particles[i];
-            
-            // Плавный дрейф
-            var driftX = Math.sin(time * 0.001 + p.driftSeed) * p.drift;
-            var driftY = Math.cos(time * 0.001 + p.driftSeed * 0.7) * p.drift * 0.5;
-            
-            p.x += (p.speedX + driftX) * delta * 60;
-            p.y += (p.speedY + driftY) * delta * 60;
-            
-            // Границы с "телепортацией"
-            if (p.x < -p.size) p.x = this.width + p.size;
-            if (p.x > this.width + p.size) p.x = -p.size;
-            if (p.y < -p.size) p.y = this.height + p.size;
-            if (p.y > this.height + p.size) p.y = -p.size;
-            
-            // Рисуем частицу тумана
-            var gradient = this.ctx.createRadialGradient(
-                p.x, p.y, 0,
-                p.x, p.y, p.size
-            );
-            gradient.addColorStop(0, 'rgba(255, 255, 255, ' + (p.opacity * 0.8) + ')');
-            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-            
-            this.ctx.beginPath();
-            this.ctx.fillStyle = gradient;
-            this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            this.ctx.fill();
+    // Класс частицы тумана
+    class FogParticle {
+        constructor(layer = 0) {
+            this.layer = layer;
+            this.reset();
+            // Начальная позиция случайно по всему экрану
+            this.x = Math.random() * canvas.width;
+            this.y = Math.random() * canvas.height;
+            this.opacity = Math.random() * 0.1 + fogSettings.opacity;
+            this.size = Math.random() * fogSettings.particleSize * (1 - layer * 0.3) + 20;
         }
         
-        this.animationId = requestAnimationFrame(this.animate.bind(this));
-    };
-    
-    Fog.prototype.start = function() {
-        if (this.animationId || !this.settings.enabled) return;
-        
-        this.init();
-        this.resetParticles();
-        this.lastTime = 0;
-        this.animationId = requestAnimationFrame(this.animate.bind(this));
-        
-        console.log('Fog Plugin: started');
-    };
-    
-    Fog.prototype.stop = function() {
-        if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
-            this.animationId = 0;
-        }
-        if (this.canvas && this.canvas.parentNode) {
-            this.canvas.parentNode.removeChild(this.canvas);
-            this.canvas = null;
-            this.ctx = null;
-        }
-        this.particles = [];
-        
-        console.log('Fog Plugin: stopped');
-    };
-    
-    Fog.prototype.updateSettings = function() {
-        this.settings = {
-            enabled: num(storageGet(STORAGE_KEY, DEFAULT_ENABLED ? 1 : 0), DEFAULT_ENABLED ? 1 : 0) === 1,
-            density: num(storageGet('fog_density', 0), 0),
-            speed: num(storageGet('fog_speed', 0), 0),
-            size: num(storageGet('fog_size', 0), 0)
-        };
-    };
-    
-    // ===== ГЛАВНЫЙ ОБЪЕКТ ПЛАГИНА =====
-    var plugin = {
-        fog: null,
-        current_state: false,
-        on_allowed_screen: false,
-        overlay_open: false,
-        
-        init: function() {
-            console.log('Fog Plugin: initializing...');
+        reset() {
+            // Разные слои двигаются с разной скоростью
+            const layerFactor = 1 - this.layer * 0.2;
             
-            this.fog = new Fog();
-            this.updateState();
+            this.x = Math.random() * canvas.width * 1.2 - canvas.width * 0.1;
+            this.y = Math.random() * canvas.height * 1.5;
+            this.speed = (Math.random() * fogSettings.speed + 0.1) * layerFactor;
+            this.opacity = Math.random() * 0.08 + fogSettings.opacity * layerFactor;
+            this.size = Math.random() * fogSettings.particleSize * layerFactor + 20;
+            this.wind = (Math.random() - 0.5) * fogSettings.wind;
+            this.wobble = Math.random() * fogSettings.turbulence;
+            this.wobbleSpeed = Math.random() * 0.02 + 0.005;
+            this.wobbleOffset = Math.random() * Math.PI * 2;
+        }
+        
+        update() {
+            // Плавное движение вверх с ветром
+            this.y -= this.speed;
+            this.x += Math.sin(Date.now() * this.wobbleSpeed + this.wobbleOffset) * this.wobble + this.wind;
             
-            // Слушаем события активности Lampa
-            if (window.Lampa && Lampa.Activity) {
-                Lampa.Activity.active(this.onActivityChange.bind(this));
+            // Медленное изменение прозрачности для эффекта мерцания
+            this.opacity += (Math.sin(Date.now() * 0.001 + this.wobbleOffset) * 0.01);
+            this.opacity = Math.max(fogSettings.opacity * 0.5, Math.min(fogSettings.opacity * 1.5, this.opacity));
+            
+            // Легкое изменение размера
+            this.size += Math.sin(Date.now() * 0.002 + this.wobbleOffset) * 0.1;
+            
+            // Если частица вышла за верхнюю границу, сбрасываем ее
+            if (this.y < -this.size || 
+                this.x < -this.size || 
+                this.x > canvas.width + this.size) {
+                this.reset();
+                this.y = canvas.height + this.size;
+                this.x = Math.random() * canvas.width;
             }
-            
-            // Проверяем открытые overlay (модальные окна, плеер)
-            this.startOverlayChecker();
-            
-            // Добавляем пункт в меню настроек
-            this.addToMenu();
-        },
+        }
         
-        onActivityChange: function(e) {
-            this.on_allowed_screen = isAllowedActivity(e);
-            this.updateState();
-        },
-        
-        startOverlayChecker: function() {
-            var self = this;
-            setInterval(function() {
-                var newOverlayState = self.detectOverlayOpen();
-                if (newOverlayState !== self.overlay_open) {
-                    self.overlay_open = newOverlayState;
-                    self.updateState();
-                }
-            }, 500);
-        },
-        
-        detectOverlayOpen: function() {
-            // Проверяем, открыто ли модальное окно или плеер
-            return !!document.querySelector('.layer--modal, .player, .fullscreen, [data-layer="modal"]');
-        },
-        
-        updateState: function() {
-            this.fog.updateSettings();
+        draw() {
+            ctx.beginPath();
             
-            var shouldBeActive = this.fog.settings.enabled && 
-                                this.on_allowed_screen && 
-                                !this.overlay_open;
-            
-            if (shouldBeActive && !this.current_state) {
-                this.fog.start();
-                this.current_state = true;
-            } else if (!shouldBeActive && this.current_state) {
-                this.fog.stop();
-                this.current_state = false;
-            }
-        },
-        
-        // ===== ИНТЕГРАЦИЯ С МЕНЮ LAMPA =====
-        // ТОЧНО КАК В snow_new.js
-        addToMenu: function() {
-            if (!window.Lampa || !Lampa.Settings) {
-                console.log('Fog Plugin: Lampa.Settings not found, retrying in 1 second...');
-                setTimeout(this.addToMenu.bind(this), 1000);
-                return;
-            }
-            
-            console.log('Fog Plugin: Adding to Lampa menu...');
-            
-            // Иконка тумана в SVG
-            var fogIcon = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">' +
-                          '<path d="M3 15h18c-.5-1-1.5-2-3-2H6c-1.5 0-2.5 1-3 2zm0 4h18c-.5-1-1.5-2-3-2H6c-1.5 0-2.5 1-3 2zM5 11c1.5 0 2.5-1 3-2h8c.5 1 1.5 2 3 2h5"/>' +
-                          '</svg>';
-            
-            // Добавляем вкладку в настройки
-            Lampa.Settings.add({
-                title: 'Эффект тумана',
-                name: PLUGIN_NAME,
-                component: PLUGIN_NAME,
-                icon: fogIcon
-            });
-            
-            // Регистрируем компонент
-            Lampa.Component.add(PLUGIN_NAME, {
-                template: { 'fog_settings': 1 },
-                create: function() {
-                    // Получаем HTML шаблон
-                    this.html = Lampa.Template.get('fog_settings', {});
-                    
-                    // Находим все селекторы
-                    this.enabled = this.html.find('.selector-select[data-name="enabled"]');
-                    this.density = this.html.find('.selector-select[data-name="density"]');
-                    this.speed = this.html.find('.selector-select[data-name="speed"]');
-                    this.size = this.html.find('.selector-select[data-name="size"]');
-                    
-                    // Устанавливаем текущие значения
-                    var enabledVal = storageGet(STORAGE_KEY, DEFAULT_ENABLED ? 1 : 0) ? '1' : '0';
-                    this.enabled.val(enabledVal).trigger('change');
-                    
-                    this.density.val(storageGet('fog_density', 0)).trigger('change');
-                    this.speed.val(storageGet('fog_speed', 0)).trigger('change');
-                    this.size.val(storageGet('fog_size', 0)).trigger('change');
-                    
-                    // Обработчики изменений
-                    var self = this;
-                    this.html.find('.selector-select').on('change', function() {
-                        var name = $(this).data('name');
-                        var value = $(this).val();
-                        
-                        if (name === 'enabled') {
-                            storageSet(STORAGE_KEY, value === '1' ? 1 : 0);
-                        } else {
-                            storageSet('fog_' + name, parseInt(value));
-                        }
-                        
-                        // Обновляем эффект
-                        plugin.updateState();
-                    });
-                }
-            });
-            
-            // Регистрируем HTML шаблон
-            Lampa.Template.add('fog_settings',
-                '<div class="settings-layer">' +
-                '  <div class="settings-layer__name">Эффект тумана</div>' +
-                '  <div class="settings-list">' +
-                '    <div class="selector selector-focusable">' +
-                '      <div class="selector__body">' +
-                '        <div class="selector__items">' +
-                '          <select class="selector-select" data-name="enabled">' +
-                '            <option value="0">Выключено</option>' +
-                '            <option value="1">Включено</option>' +
-                '          </select>' +
-                '        </div>' +
-                '        <div class="selector__name">Состояние</div>' +
-                '      </div>' +
-                '    </div>' +
-                '    <div class="selector selector-focusable">' +
-                '      <div class="selector__body">' +
-                '        <div class="selector__items">' +
-                '          <select class="selector-select" data-name="density">' +
-                '            <option value="0">Авто</option>' +
-                '            <option value="1">Низкая</option>' +
-                '            <option value="2">Средняя</option>' +
-                '            <option value="3">Высокая</option>' +
-                '          </select>' +
-                '        </div>' +
-                '        <div class="selector__name">Плотность</div>' +
-                '      </div>' +
-                '    </div>' +
-                '    <div class="selector selector-focusable">' +
-                '      <div class="selector__body">' +
-                '        <div class="selector__items">' +
-                '          <select class="selector-select" data-name="speed">' +
-                '            <option value="0">Авто</option>' +
-                '            <option value="1">Медленно</option>' +
-                '            <option value="2">Нормально</option>' +
-                '            <option value="3">Быстро</option>' +
-                '          </select>' +
-                '        </div>' +
-                '        <div class="selector__name">Скорость</div>' +
-                '      </div>' +
-                '    </div>' +
-                '    <div class="selector selector-focusable">' +
-                '      <div class="selector__body">' +
-                '        <div class="selector__items">' +
-                '          <select class="selector-select" data-name="size">' +
-                '            <option value="0">Авто</option>' +
-                '            <option value="1">Маленькие</option>' +
-                '            <option value="2">Средние</option>' +
-                '            <option value="3">Крупные</option>' +
-                '          </select>' +
-                '        </div>' +
-                '        <div class="selector__name">Размер частиц</div>' +
-                '      </div>' +
-                '    </div>' +
-                '    <div class="settings-description">' +
-                '      Атмосферный эффект тумана на фоне интерфейса. Автоматически отключается при открытии плеера или модальных окон.' +
-                '    </div>' +
-                '  </div>' +
-                '</div>'
+            // Создаем размытый кружок для эффекта тумана
+            const gradient = ctx.createRadialGradient(
+                this.x, this.y, 0,
+                this.x, this.y, this.size
             );
             
-            console.log('Fog Plugin: Successfully added to Lampa menu');
+            gradient.addColorStop(0, `rgba(232, 244, 255, ${this.opacity})`);
+            gradient.addColorStop(0.3, `rgba(232, 244, 255, ${this.opacity * 0.7})`);
+            gradient.addColorStop(1, `rgba(232, 244, 255, 0)`);
+            
+            ctx.fillStyle = gradient;
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Добавляем легкое внутреннее свечение для объема
+            const innerGradient = ctx.createRadialGradient(
+                this.x, this.y, 0,
+                this.x, this.y, this.size * 0.7
+            );
+            
+            innerGradient.addColorStop(0, `rgba(255, 255, 255, ${this.opacity * 1.2})`);
+            innerGradient.addColorStop(1, `rgba(255, 255, 255, 0)`);
+            
+            ctx.fillStyle = innerGradient;
+            ctx.arc(this.x, this.y, this.size * 0.7, 0, Math.PI * 2);
+            ctx.fill();
         }
-    };
+    }
     
-    // ===== ЗАПУСК ПЛАГИНА =====
-    // Ждем загрузки страницы
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(function() {
-                plugin.init();
-            }, 1000);
+    // Инициализация частиц тумана
+    function initParticles() {
+        particles = [];
+        
+        // Создаем несколько слоев тумана
+        for (let layer = 0; layer < fogSettings.layers; layer++) {
+            const particlesPerLayer = Math.floor(fogSettings.particleCount / fogSettings.layers);
+            
+            for (let i = 0; i < particlesPerLayer; i++) {
+                particles.push(new FogParticle(layer));
+            }
+        }
+    }
+    
+    // Анимация
+    function animate() {
+        // Полупрозрачный фон для эффекта накопления
+        ctx.fillStyle = `rgba(248, 250, 252, 0.02)`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Обновляем и рисуем все частицы
+        particles.forEach(particle => {
+            particle.update();
+            particle.draw();
         });
-    } else {
-        setTimeout(function() {
-            plugin.init();
-        }, 1000);
+        
+        // Добавляем легкий градиент сверху для глубины
+        const topGradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.3);
+        topGradient.addColorStop(0, 'rgba(248, 250, 252, 0.15)');
+        topGradient.addColorStop(1, 'rgba(248, 250, 252, 0)');
+        ctx.fillStyle = topGradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height * 0.3);
+        
+        animationId = requestAnimationFrame(animate);
     }
     
-})();
+    // Управление плотностью тумана
+    function updateFogDensity(factor) {
+        fogSettings.particleCount = Math.floor(fogSettings.maxParticles * factor);
+        initParticles();
+    }
+    
+    // Публичный API для управления туманом
+    window.fogController = {
+        setDensity: (density) => {
+            fogSettings.density = Math.max(0.1, Math.min(1, density));
+            updateFogDensity(fogSettings.density);
+        },
+        setSpeed: (speed) => {
+            fogSettings.speed = Math.max(0.1, Math.min(2, speed));
+        },
+        setOpacity: (opacity) => {
+            fogSettings.opacity = Math.max(0.01, Math.min(0.2, opacity));
+        },
+        setColor: (color) => {
+            fogSettings.color = color;
+        },
+        start: () => {
+            if (!animationId) {
+                initCanvas();
+                animate();
+            }
+        },
+        stop: () => {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+                if (canvas.parentNode) {
+                    canvas.parentNode.removeChild(canvas);
+                }
+            }
+        },
+        getSettings: () => ({ ...fogSettings })
+    };
+    
+    // Автоматический старт
+    window.fogController.start();
+    
+    // Адаптация к системным предпочтениям
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    
+    if (prefersReducedMotion.matches) {
+        fogSettings.speed *= 0.3;
+        fogSettings.particleCount = Math.floor(fogSettings.particleCount * 0.5);
+    }
+    
+    prefersReducedMotion.addEventListener('change', (e) => {
+        if (e.matches) {
+            fogSettings.speed *= 0.3;
+            fogSettings.particleCount = Math.floor(fogSettings.particleCount * 0.5);
+        } else {
+            fogSettings.speed /= 0.3;
+            fogSettings.particleCount = Math.floor(fogSettings.particleCount / 0.5);
+        }
+        initParticles();
+    });
+});

@@ -1,72 +1,199 @@
 (function () {
 	"use strict";
 
+	// Конфигурация
 	const ANISKIP_API = "https://api.aniskip.com/v2/skip-times";
-	const SKIP_TYPES = ["op", "ed", "recap"];
-	
-	// CORS прокси для обхода ограничений
-	const CORS_PROXY = "https://corsproxy.io/?"; // или https://api.allorigins.win/raw?url=
 	const ANILIST_API = "https://graphql.anilist.co";
+	const SKIP_TYPES = ["op", "ed", "recap"];
 
-	function log(message, showNotify = false) {
-		console.log("[AniSkip-Fixed]: " + message);
-		if (showNotify && typeof Lampa !== "undefined" && Lampa.Noty) {
-			// Можно включить уведомления
-		}
+	// Руководство по названиям (русское -> английское)
+	const ANIME_MAPPING = {
+		// Jujutsu Kaisen
+		"магическая битва": "Jujutsu Kaisen",
+		"джуцзу кайсен": "Jujutsu Kaisen",
+		"jujutsu kaisen": "Jujutsu Kaisen",
+		"jjк": "Jujutsu Kaisen",
+		
+		// Attack on Titan
+		"атака титанов": "Attack on Titan",
+		"attack on titan": "Attack on Titan",
+		"shingeki no kyojin": "Attack on Titan",
+		
+		// One Piece
+		"ван пис": "One Piece",
+		"one piece": "One Piece",
+		"вон пис": "One Piece",
+		
+		// Naruto
+		"наруто": "Naruto",
+		"naruto": "Naruto",
+		
+		// Bleach
+		"блич": "Bleach",
+		"bleach": "Bleach",
+		
+		// Demon Slayer
+		"истребитель демонов": "Demon Slayer",
+		"клинок рассекающий демонов": "Demon Slayer",
+		"demon slayer": "Demon Slayer",
+		
+		// My Hero Academia
+		"моя геройская академия": "My Hero Academia",
+		"my hero academia": "My Hero Academia",
+		"академия героев": "My Hero Academia",
+		
+		// Chainsaw Man
+		"человек бензопила": "Chainsaw Man",
+		"chainsaw man": "Chainsaw Man",
+		
+		// Spy x Family
+		"шпионская семья": "Spy x Family",
+		"spy x family": "Spy x Family",
+		
+		// Tokyo Revengers
+		"токийские мстители": "Tokyo Revengers",
+		"tokyo revengers": "Tokyo Revengers",
+		
+		// Vinland Saga
+		"сага о винланде": "Vinland Saga",
+		"vinland saga": "Vinland Saga",
+		
+		// Mob Psycho 100
+		"моб психо 100": "Mob Psycho 100",
+		"mob psycho 100": "Mob Psycho 100",
+		
+		// One Punch Man
+		"ванпанчмен": "One Punch Man",
+		"one punch man": "One Punch Man",
+		
+		// Dr. Stone
+		"доктор стоун": "Dr. Stone",
+		"dr. stone": "Dr. Stone",
+		"dr stone": "Dr. Stone",
+		
+		// Haikyuu!!
+		"хайкю": "Haikyuu!!",
+		"haikyuu": "Haikyuu!!",
+		
+		// Black Clover
+		"блэк кловер": "Black Clover",
+		"black clover": "Black Clover",
+		
+		// Sword Art Online
+		"мастер меча онлайн": "Sword Art Online",
+		"sword art online": "Sword Art Online",
+		"сао": "Sword Art Online",
+		
+		// Re:Zero
+		"ре зеро": "Re:Zero",
+		"re zero": "Re:Zero",
+		"re:zero": "Re:Zero",
+		
+		// Konosuba
+		"богиня благословляет этот прекрасный мир": "Konosuba",
+		"konosuba": "Konosuba",
+		
+		// Overlord
+		"оверлорд": "Overlord",
+		"overlord": "Overlord",
+		
+		// That Time I Got Reincarnated as a Slime
+		"перерождение в слизь": "That Time I Got Reincarnated as a Slime",
+		"tensura": "That Time I Got Reincarnated as a Slime",
+		
+		// Mushoku Tensei
+		"бесполезное перерождение": "Mushoku Tensei",
+		"mushoku tensei": "Mushoku Tensei"
+	};
+
+	function log(message) {
+		console.log("[AniSkip]: " + message);
 	}
 
-	function addSegmentsToItem(item, newSegments) {
-		if (!item || typeof item !== "object") return 0;
-
+	function addSegmentsToItem(item, segments) {
+		if (!item || !segments || segments.length === 0) return 0;
+		
 		item.segments = item.segments || {};
 		item.segments.skip = item.segments.skip || [];
-
-		let count = 0;
-		newSegments.forEach((newSeg) => {
-			const exists = item.segments.skip.some((s) => Math.abs(s.start - newSeg.start) < 1);
+		
+		let added = 0;
+		segments.forEach(seg => {
+			const exists = item.segments.skip.some(s => 
+				Math.abs(s.start - seg.start) < 1 && 
+				Math.abs(s.end - seg.end) < 1
+			);
+			
 			if (!exists) {
 				item.segments.skip.push({
-					start: newSeg.start,
-					end: newSeg.end,
-					name: newSeg.name || "Пропустить",
+					start: seg.start,
+					end: seg.end,
+					name: seg.name || "Пропустить"
 				});
-				count++;
+				added++;
 			}
 		});
-		return count;
+		
+		return added;
 	}
 
-	// Парсинг названия с улучшенной логикой
-	function parseAnimeInfo(title) {
-		// Удаляем лишнее из названия
+	// Улучшенный парсинг названия
+	function parseVideoInfo(title) {
+		if (!title) return { name: "", episode: 1 };
+		
+		// Удаляем лишнее
 		let cleanTitle = title
 			.replace(/\(\s*\d+\s*серия\s*\)/gi, "")
 			.replace(/-\s*\d+\s*серия/gi, "")
-			.replace(/серия\s*\d+/gi, "")
-			.replace(/\s*\(\s*\d{4}\s*\)/g, "")
+			.replace(/\s*серия\s*\d+/gi, "")
+			.replace(/episode\s*\d+/gi, "")
 			.replace(/\(.*?\)/g, "")
 			.replace(/\s+/g, " ")
 			.trim();
 		
 		// Извлекаем номер эпизода
 		let episode = 1;
-		const episodeMatch = title.match(/(\d+)\s*(?:серия|серии|эпизод|episode)/i);
-		if (episodeMatch) episode = parseInt(episodeMatch[1]);
+		const episodeMatch = title.match(/(\d+)\s*(?:серия|серии|эпизод|episode|эп)/i);
+		if (episodeMatch) {
+			episode = parseInt(episodeMatch[1]);
+		} else {
+			// Пробуем найти число в конце
+			const numberAtEnd = title.match(/(\d+)\s*$/);
+			if (numberAtEnd) episode = parseInt(numberAtEnd[1]);
+		}
 		
 		return { name: cleanTitle, episode: episode };
 	}
 
-	// Получение MAL ID через AniList GraphQL (работает без CORS)
-	async function getMALIdFromAnimeName(animeName) {
-		// Кэширование
-		const cacheKey = `malid_${animeName.toLowerCase().replace(/\s+/g, '_')}`;
-		const cached = localStorage.getItem(cacheKey);
-		if (cached) return parseInt(cached);
+	// Преобразование русского названия в английское
+	function translateToEnglish(name) {
+		const lowerName = name.toLowerCase();
 		
-		log(`Searching for: "${animeName}"`);
+		// Проверяем ручной маппинг
+		for (const [rus, eng] of Object.entries(ANIME_MAPPING)) {
+			if (lowerName.includes(rus)) {
+				return eng;
+			}
+		}
+		
+		// Если не нашли, возвращаем оригинал
+		return name;
+	}
+
+	// Получение MAL ID через AniList
+	async function getMALId(englishName) {
+		// Проверяем кэш
+		const cacheKey = `mal_${englishName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+		const cached = localStorage.getItem(cacheKey);
+		if (cached) {
+			const data = JSON.parse(cached);
+			if (Date.now() - data.timestamp < 7 * 24 * 60 * 60 * 1000) { // 7 дней
+				return data.malId;
+			}
+		}
+		
+		log(`Searching MAL ID for: "${englishName}"`);
 		
 		try {
-			// Запрос к AniList GraphQL
 			const query = `
 				query ($search: String) {
 					Media(search: $search, type: ANIME) {
@@ -90,29 +217,34 @@
 				},
 				body: JSON.stringify({
 					query: query,
-					variables: { search: animeName }
+					variables: { search: englishName }
 				})
 			});
 			
 			if (!response.ok) {
-				throw new Error(`AniList API error: ${response.status}`);
+				throw new Error(`HTTP ${response.status}`);
 			}
 			
 			const data = await response.json();
 			
 			if (data?.data?.Media?.idMal) {
 				const malId = data.data.Media.idMal;
-				localStorage.setItem(cacheKey, malId.toString());
-				log(`Found MAL ID: ${malId} for "${animeName}"`);
+				
+				// Сохраняем в кэш
+				localStorage.setItem(cacheKey, JSON.stringify({
+					malId: malId,
+					timestamp: Date.now(),
+					title: data.data.Media.title.romaji || englishName
+				}));
+				
+				log(`Found MAL ID: ${malId} (${data.data.Media.title.romaji || englishName})`);
 				return malId;
 			}
 			
-			// Если не нашли по точному названию, пробуем поиск
-			log("Exact match not found, trying search...");
-			
+			// Пробуем поиск с несколькими результатами
 			const searchQuery = `
 				query ($search: String) {
-					Page(page: 1, perPage: 5) {
+					Page(page: 1, perPage: 3) {
 						media(search: $search, type: ANIME) {
 							id
 							idMal
@@ -134,20 +266,24 @@
 				},
 				body: JSON.stringify({
 					query: searchQuery,
-					variables: { search: animeName }
+					variables: { search: englishName }
 				})
 			});
 			
 			const searchData = await searchResponse.json();
 			
 			if (searchData?.data?.Page?.media?.length > 0) {
-				// Ищем лучшее совпадение
-				const media = searchData.data.Page.media;
-				for (const item of media) {
-					if (item.idMal) {
-						const malId = item.idMal;
-						localStorage.setItem(cacheKey, malId.toString());
-						log(`Found MAL ID in search: ${malId} for "${item.title.romaji || item.title.english}"`);
+				for (const media of searchData.data.Page.media) {
+					if (media.idMal) {
+						const malId = media.idMal;
+						
+						localStorage.setItem(cacheKey, JSON.stringify({
+							malId: malId,
+							timestamp: Date.now(),
+							title: media.title.romaji || englishName
+						}));
+						
+						log(`Found MAL ID in search: ${malId} (${media.title.romaji})`);
 						return malId;
 					}
 				}
@@ -156,37 +292,33 @@
 			return null;
 			
 		} catch (error) {
-			log(`AniList search error: ${error.message}`);
+			log(`AniList error: ${error.message}`);
 			return null;
 		}
 	}
 
-	// Получение сегментов пропуска через AniSkip
-	async function getSkipSegments(malId, episode) {
+	// Получение сегментов пропуска
+	async function getSkipTimes(malId, episode) {
 		if (!malId || !episode) return [];
 		
-		const cacheKey = `segments_${malId}_${episode}`;
+		// Проверяем кэш
+		const cacheKey = `skip_${malId}_${episode}`;
 		const cached = localStorage.getItem(cacheKey);
 		if (cached) {
-			try {
-				return JSON.parse(cached);
-			} catch {
-				// ignore
+			const data = JSON.parse(cached);
+			if (Date.now() - data.timestamp < 30 * 24 * 60 * 60 * 1000) { // 30 дней
+				log(`Using cached skip times for episode ${episode}`);
+				return data.segments;
 			}
 		}
-		
-		// AniSkip принимает как shikimori_id, так и mal_id
-		// Обычно это одно и то же число для большинства аниме
-		const types = SKIP_TYPES.map((t) => "types[]=" + t).join("&");
-		const url = `${ANISKIP_API}/${malId}/${episode}?${types}&episodeLength=0`;
 		
 		log(`Requesting skip times for MAL ID ${malId}, episode ${episode}`);
 		
 		try {
-			// Используем прокси для обхода CORS если нужно
-			const fetchUrl = url; // Можно использовать CORS_PROXY + encodeURIComponent(url) если нужно
+			const types = SKIP_TYPES.map(t => `types[]=${t}`).join("&");
+			const url = `${ANISKIP_API}/${malId}/${episode}?${types}&episodeLength=0`;
 			
-			const response = await fetch(fetchUrl, {
+			const response = await fetch(url, {
 				headers: {
 					"Accept": "application/json",
 					"User-Agent": "LampaAnimeSkip/1.0"
@@ -194,7 +326,7 @@
 			});
 			
 			if (response.status === 404) {
-				log(`No skip times found for episode ${episode}`);
+				log(`No skip times for episode ${episode}`);
 				return [];
 			}
 			
@@ -206,9 +338,10 @@
 			const data = await response.json();
 			
 			if (data.found && data.results?.length > 0) {
-				const segments = data.results.map((item) => {
+				const segments = data.results.map(item => {
 					const type = (item.skipType || item.skip_type || "").toLowerCase();
 					let name = "Пропустить";
+					
 					if (type.includes("op")) name = "Опенинг";
 					else if (type.includes("ed")) name = "Эндинг";
 					else if (type === "recap") name = "Рекап";
@@ -216,12 +349,18 @@
 					return {
 						start: item.interval.startTime ?? item.interval.start_time,
 						end: item.interval.endTime ?? item.interval.end_time,
-						name: name
+						name: name,
+						type: type
 					};
-				}).filter(s => s.start && s.end);
+				}).filter(seg => seg.start && seg.end);
 				
 				// Сохраняем в кэш
-				localStorage.setItem(cacheKey, JSON.stringify(segments));
+				localStorage.setItem(cacheKey, JSON.stringify({
+					segments: segments,
+					timestamp: Date.now(),
+					count: segments.length
+				}));
+				
 				log(`Found ${segments.length} skip segments`);
 				return segments;
 			}
@@ -234,103 +373,81 @@
 		}
 	}
 
-	// Проверка, является ли контент аниме
-	function isAnimeContent(card, title) {
-		if (!card) {
-			// Проверяем по названию
-			const lowerTitle = title.toLowerCase();
-			const animeKeywords = [
-				'магическая', 'битва', 'аниме', 'anime',
-				'ниндзя', 'дракон', 'самурай', 'магия',
-				'shounen', 'shoujo', 'сёнен', 'сёдзё'
-			];
-			
-			return animeKeywords.some(keyword => lowerTitle.includes(keyword));
+	// Определяем, аниме ли это
+	function isAnime(title) {
+		if (!title) return false;
+		
+		const lowerTitle = title.toLowerCase();
+		
+		// Ключевые слова, указывающие на аниме
+		const animeKeywords = [
+			'аниме', 'anime', 'магическая', 'битва', 'ниндзя',
+			'дракон', 'самурай', 'магия', 'сёнен', 'сёдзё',
+			'shonen', 'shoujo', 'seinen', 'josei', 'эпизод',
+			'серия', 'opening', 'ending', 'опенинг', 'эндинг'
+		];
+		
+		// Проверяем по ключевым словам
+		for (const keyword of animeKeywords) {
+			if (lowerTitle.includes(keyword)) {
+				return true;
+			}
 		}
 		
-		// Проверяем язык
-		const lang = (card.original_language || "").toLowerCase();
-		const isAsian = ['ja', 'zh', 'cn', 'ko'].includes(lang);
+		// Проверяем по ручному маппингу
+		for (const rusName of Object.keys(ANIME_MAPPING)) {
+			if (lowerTitle.includes(rusName)) {
+				return true;
+			}
+		}
 		
-		// Проверяем жанры
-		const isAnimation = card.genres?.some(g => 
-			g.id === 16 || 
-			(g.name && g.name.toLowerCase().includes('аниме')) ||
-			(g.name && g.name.toLowerCase().includes('animation'))
-		);
-		
-		return isAsian || isAnimation;
+		return false;
 	}
 
-	// Основная функция обработки
-	async function processAnimeSkip(videoParams) {
+	// Основная функция
+	async function processVideo(videoParams) {
 		try {
-			// Получаем информацию о видео
-			let card = videoParams.movie || videoParams.card;
-			if (!card) {
-				const active = Lampa.Activity.active();
-				if (active) card = active.movie || active.card;
+			// Получаем название из параметров
+			const title = videoParams.title || "";
+			
+			if (!title) {
+				log("No title provided");
+				return;
 			}
 			
-			// Название из параметров или карточки
-			const title = card?.title || videoParams.title || "";
-			
-			// Парсим информацию
-			const animeInfo = parseAnimeInfo(title);
-			log(`Processing: "${animeInfo.name}", Episode: ${animeInfo.episode}`);
+			log(`Processing: "${title}"`);
 			
 			// Проверяем, аниме ли это
-			if (!isAnimeContent(card, animeInfo.name)) {
+			if (!isAnime(title)) {
 				log("Not an anime, skipping");
 				return;
 			}
 			
-			// Для "МАГИЧЕСКАЯ БИТВА" - это Jujutsu Kaisen (MAL ID: 40748)
-			// Можно добавить ручной маппинг для популярных аниме
-			const manualMapping = {
-				"магическая битва": 40748, // Jujutsu Kaisen
-				"jujutsu kaisen": 40748,
-				"джуцзу кайсен": 40748,
-				"атака титанов": 16498, // Attack on Titan
-				"attack on titan": 16498,
-				"наруто": 20,
-				"naruto": 20,
-				"ван пис": 21, // One Piece
-				"one piece": 21,
-				"блич": 269, // Bleach
-				"bleach": 269
-			};
+			// Парсим информацию
+			const videoInfo = parseVideoInfo(title);
+			log(`Parsed: "${videoInfo.name}", Episode: ${videoInfo.episode}`);
 			
-			let malId = null;
-			const lowerName = animeInfo.name.toLowerCase();
+			// Переводим на английский
+			const englishName = translateToEnglish(videoInfo.name);
+			log(`Translated to: "${englishName}"`);
 			
-			// Проверяем ручной маппинг
-			for (const [key, id] of Object.entries(manualMapping)) {
-				if (lowerName.includes(key)) {
-					malId = id;
-					log(`Manual mapping found: ${animeInfo.name} -> MAL ID: ${malId}`);
-					break;
-				}
-			}
-			
-			// Если нет в маппинге, ищем через API
-			if (!malId) {
-				malId = await getMALIdFromAnimeName(animeInfo.name);
-			}
+			// Получаем MAL ID
+			const malId = await getMALId(englishName);
 			
 			if (!malId) {
-				log(`Could not find MAL ID for "${animeInfo.name}"`);
+				log(`Could not find MAL ID for "${englishName}"`);
 				return;
 			}
 			
 			// Получаем сегменты пропуска
-			const segments = await getSkipSegments(malId, animeInfo.episode);
+			const segments = await getSkipTimes(malId, videoInfo.episode);
 			
 			if (segments.length > 0) {
+				// Добавляем сегменты
 				const added = addSegmentsToItem(videoParams, segments);
 				
 				if (added > 0) {
-					log(`Successfully added ${added} skip segments`);
+					log(`Added ${added} skip segments`);
 					
 					// Показываем уведомление
 					if (Lampa.Noty) {
@@ -343,7 +460,7 @@
 					}
 				}
 			} else {
-				log("No skip segments available for this episode");
+				log("No skip segments available");
 			}
 			
 		} catch (error) {
@@ -351,56 +468,53 @@
 		}
 	}
 
-	// Инициализация плагина
+	// Инициализация
 	function init() {
-		if (window.lampa_anime_skip_fixed) return;
-		window.lampa_anime_skip_fixed = true;
+		if (window.lampa_anime_skip_simple) return;
+		window.lampa_anime_skip_simple = true;
 		
+		// Сохраняем оригинальный метод
 		const originalPlay = Lampa.Player.play;
 		
+		// Переопределяем метод
 		Lampa.Player.play = function (videoParams) {
-			// Запускаем поиск сегментов
+			// Запускаем обработку в фоне
 			setTimeout(() => {
-				processAnimeSkip(videoParams).catch(e => {
-					console.error("[AniSkip] Error:", e);
-				});
-			}, 500); // Небольшая задержка для стабильности
+				processVideo(videoParams);
+			}, 1000); // Задержка для стабильности
 			
-			// Воспроизводим видео
+			// Вызываем оригинальный метод
 			return originalPlay.call(this, videoParams);
 		};
 		
-		log("AniSkip Plugin initialized (fixed version)");
+		log("Simple Anime Skip plugin initialized");
 		
-		// Добавляем ручное обновление сегментов
-		if (window.Lampa) {
-			window.Lampa.AniSkip = {
-				refresh: () => {
-					const active = Lampa.Activity.active();
-					if (active && active.videoParams) {
-						processAnimeSkip(active.videoParams);
+		// Добавляем глобальные методы для отладки
+		window.AniSkipDebug = {
+			clearCache: () => {
+				const keys = [];
+				for (let i = 0; i < localStorage.length; i++) {
+					const key = localStorage.key(i);
+					if (key.startsWith("mal_") || key.startsWith("skip_")) {
+						keys.push(key);
 					}
-				},
-				clearCache: () => {
-					const keys = [];
-					for (let i = 0; i < localStorage.length; i++) {
-						const key = localStorage.key(i);
-						if (key.startsWith("malid_") || key.startsWith("segments_")) {
-							keys.push(key);
-						}
-					}
-					keys.forEach(key => localStorage.removeItem(key));
-					log("Cache cleared");
 				}
-			};
-		}
+				keys.forEach(key => localStorage.removeItem(key));
+				log("Cache cleared");
+			},
+			getInfo: (title) => {
+				const info = parseVideoInfo(title);
+				const english = translateToEnglish(info.name);
+				return { ...info, englishName: english };
+			}
+		};
 	}
 
-	// Запуск
-	if (window.Lampa?.Player) {
+	// Запускаем при готовности Lampa
+	if (window.Lampa && window.Lampa.Player) {
 		init();
 	} else {
-		document.addEventListener("app_ready", init);
+		window.document.addEventListener("app_ready", init);
 	}
 
 })();

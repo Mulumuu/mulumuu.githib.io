@@ -7,35 +7,43 @@
     
     console.log('FogFX: Плагин загружается...');
     
-    // Ждем полной загрузки Lampa
+    // Глобальные переменные
+    var fogInstance = null;
+    var menuAdded = false;
+    var maxInitAttempts = 15; // Увеличили количество попыток
     var initAttempts = 0;
-    var maxAttempts = 10;
     
-    function initializePlugin() {
-        console.log('FogFX: Попытка инициализации ' + (initAttempts + 1) + '/' + maxAttempts);
+    // Функция для ожидания Lampa
+    function waitForLampa(callback) {
+        console.log('FogFX: Ожидание Lampa... (попытка ' + (initAttempts + 1) + ')');
         
-        if (!window.Lampa) {
-            console.log('FogFX: Lampa не найдена, ждем...');
-            if (++initAttempts < maxAttempts) {
-                setTimeout(initializePlugin, 1000);
-            }
-            return;
+        if (window.Lampa) {
+            console.log('FogFX: Lampa найдена');
+            setTimeout(callback, 100);
+        } else if (initAttempts < maxInitAttempts) {
+            initAttempts++;
+            setTimeout(function() { waitForLampa(callback); }, 500);
+        } else {
+            console.error('FogFX: Lampa не загрузилась после ' + maxInitAttempts + ' попыток');
         }
-        
-        // Проверяем наличие необходимых компонентов Lampa
-        if (!Lampa.Settings || !Lampa.Settings.add) {
-            console.log('FogFX: Lampa.Settings не готов, ждем...');
-            if (++initAttempts < maxAttempts) {
-                setTimeout(initializePlugin, 1000);
-            }
-            return;
-        }
-        
-        console.log('FogFX: Lampa готова, начинаем инициализацию плагина');
-        initFogFX();
     }
     
+    // Функция для ожидания Lampa.Settings
+    function waitForLampaSettings(callback) {
+        console.log('FogFX: Ожидание Lampa.Settings...');
+        
+        if (window.Lampa && Lampa.Settings && typeof Lampa.Settings.add === 'function') {
+            console.log('FogFX: Lampa.Settings доступен');
+            callback();
+        } else {
+            setTimeout(function() { waitForLampaSettings(callback); }, 500);
+        }
+    }
+    
+    // Основная инициализация плагина
     function initFogFX() {
+        console.log('FogFX: Инициализация эффекта тумана');
+        
         // Константы для настроек
         var KEY_ENABLED = 'fogfx_enabled';
         var KEY_DENSITY = 'fogfx_density';
@@ -215,134 +223,195 @@
         };
         
         // Создаем экземпляр
-        var fogInstance = new FogFX();
+        fogInstance = new FogFX();
         
         // Автозапуск эффекта
         setTimeout(function() {
             if (fogInstance.config.enabled) {
                 fogInstance.start();
             }
-        }, 2000);
+        }, 3000);
         
         // Делаем глобально доступным
         window.FogFX = fogInstance;
         
-        // === ДОБАВЛЕНИЕ МЕНЮ НАСТРОЕК ===
-        console.log('FogFX: Добавляем меню настроек...');
+        console.log('FogFX: Эффект тумана инициализирован');
         
-        // Добавляем пункт в меню настроек
-        Lampa.Settings.add({
-            title: 'Эффект тумана',
-            name: 'fog_fx_settings',
-            component: 'fog_fx_settings',
-            icon: FOG_ICON,
-            position: 10
-        });
-        
-        // Создаем компонент настроек
-        Lampa.Component.add('fog_fx_settings', {
-            template: { 'fog_fx_settings': 1 },
-            create: function() {
-                console.log('FogFX: Создание компонента настроек');
-                
-                var self = this;
-                
-                // Загружаем шаблон
-                self.html = Lampa.Template.get('fog_fx_settings', {});
-                
-                // Находим все селекторы
-                var selectors = ['enabled', 'density', 'speed', 'opacity'];
-                
-                for (var i = 0; i < selectors.length; i++) {
-                    var name = selectors[i];
-                    var selector = self.html.find('.selector-select[data-name="' + name + '"]');
-                    
-                    if (selector.length) {
-                        var key = 'fogfx_' + name;
-                        var defaultValue = name === 'enabled' ? 1 : 2;
-                        
-                        // Устанавливаем сохраненное значение или значение по умолчанию
-                        var savedValue = storageGet(key, defaultValue);
-                        selector.val(savedValue);
-                        
-                        // Добавляем обработчик изменения
-                        selector.on('change', function() {
-                            var name = $(this).data('name');
-                            var value = $(this).val();
-                            var key = 'fogfx_' + name;
-                            
-                            console.log('FogFX: Изменена настройка ' + name + ' = ' + value);
-                            storageSet(key, value);
-                            
-                            // Обновляем конфиг и перезапускаем эффект
-                            fogInstance.config[name] = num(value, 2);
-                            
-                            if (fogInstance.config.enabled) {
-                                fogInstance.stop();
-                                setTimeout(function() {
-                                    fogInstance.start();
-                                }, 100);
-                            }
-                        });
-                    }
-                }
-            }
-        });
-        
-        // Добавляем шаблон для настроек
-        Lampa.Template.add('fog_fx_settings',
-            '<div class="settings-layer">' +
-            '  <div class="settings__content">' +
-            '    <div class="selector" data-name="enabled">' +
-            '      <div class="selector__body">' +
-            '        <div class="selector-title">Включить эффект тумана</div>' +
-            '        <select class="selector-select">' +
-            '          <option value="1">Да</option>' +
-            '          <option value="0">Нет</option>' +
-            '        </select>' +
-            '      </div>' +
-            '    </div>' +
-            '    <div class="selector" data-name="density">' +
-            '      <div class="selector__body">' +
-            '        <div class="selector-title">Плотность тумана</div>' +
-            '        <select class="selector-select">' +
-            '          <option value="0">Низкая</option>' +
-            '          <option value="1">Средняя</option>' +
-            '          <option value="2" selected>Высокая</option>' +
-            '          <option value="3">Очень высокая</option>' +
-            '        </select>' +
-            '      </div>' +
-            '    </div>' +
-            '    <div class="selector" data-name="speed">' +
-            '      <div class="selector__body">' +
-            '        <div class="selector-title">Скорость движения</div>' +
-            '        <select class="selector-select">' +
-            '          <option value="0">Медленно</option>' +
-            '          <option value="1">Средне</option>' +
-            '          <option value="2" selected>Быстро</option>' +
-            '          <option value="3">Очень быстро</option>' +
-            '        </select>' +
-            '      </div>' +
-            '    </div>' +
-            '    <div class="selector" data-name="opacity">' +
-            '      <div class="selector__body">' +
-            '        <div class="selector-title">Непрозрачность</div>' +
-            '        <select class="selector-select">' +
-            '          <option value="0">Слабая</option>' +
-            '          <option value="1">Средняя</option>' +
-            '          <option value="2" selected>Сильная</option>' +
-            '          <option value="3">Очень сильная</option>' +
-            '        </select>' +
-            '      </div>' +
-            '    </div>' +
-            '  </div>' +
-            '</div>'
-        );
-        
-        console.log('FogFX: Меню настроек успешно добавлено!');
-        console.log('FogFX: Плагин полностью инициализирован');
+        // Запускаем ожидание Lampa.Settings для добавления меню
+        setTimeout(function() {
+            waitForLampaSettings(addSettingsMenu);
+        }, 2000);
     }
     
-    // Запускаем инициализацию
-    setTimeout(initializePlugin, 1000);
+    // Функция добавления меню настроек
+    function addSettingsMenu() {
+        if (menuAdded) {
+            console.log('FogFX: Меню уже добавлено ранее');
+            return;
+        }
+        
+        console.log('FogFX: Начинаем добавление меню настроек');
+        
+        try {
+            // Иконка для меню
+            var FOG_ICON = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M3 15h18c-.5-1-1.5-2-3-2H6c-1.5 0-2.5 1-3 2zm0 4h18c-.5-1-1.5-2-3-2H6c-1.5 0-2.5 1-3 2zM5 11c1.5 0 2.5-1 3-2h8c.5 1 1.5 2 3 2h5"/></svg>';
+            
+            // Добавляем пункт в меню настроек
+            Lampa.Settings.add({
+                title: 'Эффект тумана',
+                name: 'fog_fx_settings',
+                component: 'fog_fx_settings',
+                icon: FOG_ICON,
+                position: 15
+            });
+            
+            console.log('FogFX: Пункт меню добавлен в Lampa.Settings');
+            
+            // Создаем компонент настроек
+            Lampa.Component.add('fog_fx_settings', {
+                template: { 'fog_fx_settings': 1 },
+                create: function() {
+                    console.log('FogFX: Создание компонента настроек тумана');
+                    
+                    var self = this;
+                    
+                    // Загружаем шаблон
+                    self.html = Lampa.Template.get('fog_fx_settings', {});
+                    
+                    // Находим все селекторы
+                    var selectors = ['enabled', 'density', 'speed', 'opacity'];
+                    
+                    for (var i = 0; i < selectors.length; i++) {
+                        var name = selectors[i];
+                        var selector = self.html.find('.selector-select[data-name="' + name + '"]');
+                        
+                        if (selector.length) {
+                            var key = 'fogfx_' + name;
+                            var defaultValue = name === 'enabled' ? 1 : 2;
+                            
+                            // Получаем сохраненное значение
+                            var savedValue = null;
+                            try {
+                                if (window.Lampa && Lampa.Storage && Lampa.Storage.get) {
+                                    savedValue = Lampa.Storage.get(key, defaultValue);
+                                } else {
+                                    var val = localStorage.getItem(key);
+                                    savedValue = val !== null ? JSON.parse(val) : defaultValue;
+                                }
+                            } catch(e) {
+                                savedValue = defaultValue;
+                            }
+                            
+                            // Устанавливаем значение
+                            selector.val(savedValue);
+                            
+                            // Добавляем обработчик изменения
+                            selector.on('change', function() {
+                                var name = $(this).data('name');
+                                var value = $(this).val();
+                                var key = 'fogfx_' + name;
+                                
+                                console.log('FogFX: Изменена настройка ' + name + ' = ' + value);
+                                
+                                // Сохраняем настройку
+                                try {
+                                    if (window.Lampa && Lampa.Storage && Lampa.Storage.set) {
+                                        Lampa.Storage.set(key, value);
+                                    } else {
+                                        localStorage.setItem(key, JSON.stringify(value));
+                                    }
+                                } catch(e) {
+                                    console.error('FogFX: Ошибка сохранения настройки', e);
+                                }
+                                
+                                // Обновляем конфиг и перезапускаем эффект
+                                if (fogInstance) {
+                                    fogInstance.config[name] = num(value, 2);
+                                    
+                                    if (fogInstance.config.enabled) {
+                                        fogInstance.stop();
+                                        setTimeout(function() {
+                                            if (fogInstance.config.enabled) {
+                                                fogInstance.start();
+                                            }
+                                        }, 100);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            });
+            
+            // Добавляем шаблон для настроек
+            Lampa.Template.add('fog_fx_settings',
+                '<div class="settings-layer">' +
+                '  <div class="settings__content">' +
+                '    <div class="selector" data-name="enabled">' +
+                '      <div class="selector__body">' +
+                '        <div class="selector-title">Включить эффект тумана</div>' +
+                '        <select class="selector-select">' +
+                '          <option value="1">Да</option>' +
+                '          <option value="0">Нет</option>' +
+                '        </select>' +
+                '      </div>' +
+                '    </div>' +
+                '    <div class="selector" data-name="density">' +
+                '      <div class="selector__body">' +
+                '        <div class="selector-title">Плотность тумана</div>' +
+                '        <select class="selector-select">' +
+                '          <option value="0">Низкая</option>' +
+                '          <option value="1">Средняя</option>' +
+                '          <option value="2" selected>Высокая</option>' +
+                '          <option value="3">Очень высокая</option>' +
+                '        </select>' +
+                '      </div>' +
+                '    </div>' +
+                '    <div class="selector" data-name="speed">' +
+                '      <div class="selector__body">' +
+                '        <div class="selector-title">Скорость движения</div>' +
+                '        <select class="selector-select">' +
+                '          <option value="0">Медленно</option>' +
+                '          <option value="1">Средне</option>' +
+                '          <option value="2" selected>Быстро</option>' +
+                '          <option value="3">Очень быстро</option>' +
+                '        </select>' +
+                '      </div>' +
+                '    </div>' +
+                '    <div class="selector" data-name="opacity">' +
+                '      <div class="selector__body">' +
+                '        <div class="selector-title">Непрозрачность</div>' +
+                '        <select class="selector-select">' +
+                '          <option value="0">Слабая</option>' +
+                '          <option value="1">Средняя</option>' +
+                '          <option value="2" selected>Сильная</option>' +
+                '          <option value="3">Очень сильная</option>' +
+                '        </select>' +
+                '      </div>' +
+                '    </div>' +
+                '  </div>' +
+                '</div>'
+            );
+            
+            menuAdded = true;
+            console.log('FogFX: Меню настроек успешно добавлено!');
+            
+        } catch (error) {
+            console.error('FogFX: Ошибка при добавлении меню:', error);
+            console.error('FogFX: Stack:', error.stack);
+        }
+    }
+    
+    // Альтернативный способ: принудительное добавление меню через 10 секунд
+    setTimeout(function() {
+        if (!menuAdded && window.Lampa && Lampa.Settings && typeof Lampa.Settings.add === 'function') {
+            console.log('FogFX: Принудительное добавление меню через таймаут');
+            addSettingsMenu();
+        }
+    }, 10000);
+    
+    // Запускаем инициализацию плагина
+    waitForLampa(initFogFX);
+    
+    console.log('FogFX: Загрузка плагина завершена');
 })();

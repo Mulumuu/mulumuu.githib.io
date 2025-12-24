@@ -2,14 +2,10 @@
 	"use strict";
 
 	const ANISKIP_API = "https://api.aniskip.com/v2/skip-times";
-	const ANILIST_API = "https://graphql.anilist.co";
 	const SKIP_TYPES = ["op", "ed", "recap"];
 
-	// Кэш для карточка-ID -> MAL-ID
-	const cardToMalCache = {};
-
 	function log(message) {
-		console.log("[AniSkip-Fixed]: " + message);
+		console.log("[AniSkip-JJK]: " + message);
 	}
 
 	function addSegmentsToItem(item, segments) {
@@ -37,82 +33,74 @@
 		return added;
 	}
 
-	// Пытаемся получить информацию из карточки Lampa
-	function getAnimeInfoFromCard(card) {
-		if (!card) return null;
+	// Проверяем все варианты названий Jujutsu Kaisen
+	function isJujutsuKaisenTitle(title) {
+		if (!title) return false;
 		
-		// Пробуем разные поля с названиями
-		const possibleTitles = [
-			card.original_title,
-			card.original_name,
-			card.title,
-			card.name,
-			card.ru_title,
-			card.en_title
-		].filter(Boolean);
+		const lowerTitle = title.toLowerCase();
 		
-		if (possibleTitles.length === 0) return null;
+		// Все возможные названия Jujutsu Kaisen
+		const jjkNames = [
+			// Английские
+			'jujutsu kaisen',
+			'jujutsu',
+			'kaisen',
+			'jjk',
+			
+			// Русские
+			'магическая битва',
+			'магическая',
+			'битва',
+			'джуцзу кайсен',
+			
+			// Японские
+			'呪術廻戦',
+			'呪術回戦',
+			'じゅじゅつかいせん',
+			'じゅつかいせん',
+			
+			// Китайские
+			'咒术回战',
+			'呪術迴戰'
+		];
 		
-		// Возвращаем первый найденный заголовок + ID карточки
-		return {
-			title: possibleTitles[0],
-			cardId: card.id || card.tmdb_id || card.kinopoisk_id,
-			season: card.season_number || 1,
-			isAnime: isLikelyAnime(card)
-		};
-	}
-
-	// Определяем, аниме ли это, по разным признакам
-	function isLikelyAnime(card) {
-		if (!card) return true; // Если нет данных, пробуем обработать
-		
-		// По языку
-		const lang = (card.original_language || "").toLowerCase();
-		const isAsianLang = ['ja', 'zh', 'cn', 'ko', 'jp'].includes(lang);
-		
-		// По жанрам
-		let isAnimeGenre = false;
-		if (card.genres && Array.isArray(card.genres)) {
-			isAnimeGenre = card.genres.some(g => {
-				const name = (g.name || "").toLowerCase();
-				return name.includes('аниме') || 
-					   name.includes('anime') || 
-					   name.includes('animation') ||
-					   name.includes('anime series') ||
-					   g.id === 16; // ID аниме в TMDB
-			});
+		// Проверяем каждое название
+		for (const name of jjkNames) {
+			if (title.includes(name) || lowerTitle.includes(name.toLowerCase())) {
+				return true;
+			}
 		}
 		
-		// По ключевым словам в названии
-		const title = (card.title || card.name || "").toLowerCase();
-		const titleKeywords = [
-			'jujutsu', 'kaisen', 'магическая', 'битва',
-			'anime', 'аниме', 'тентакли', 'дракон',
-			'ниндзя', 'самурай', 'shounen', 'сёнен'
-		];
-		const hasAnimeKeyword = titleKeywords.some(kw => title.includes(kw));
+		// Также проверяем части названия
+		const words = title.split(/[\s\-_.,:;]/);
+		for (const word of words) {
+			if (word === '呪術' || word === '廻戦' || word === '回戦') {
+				return true;
+			}
+		}
 		
-		return isAsianLang || isAnimeGenre || hasAnimeKeyword;
+		return false;
 	}
 
-	// Основная функция для Jujutsu Kaisen
-	async function processJujutsuKaisen(videoParams, episode) {
+	// Главная функция для Jujutsu Kaisen
+	async function processJujutsuKaisenDirectly(videoParams, episodeNumber) {
 		const JUJUTSU_KAISEN_MAL_ID = 40748;
 		
-		log(`Jujutsu Kaisen detected, episode ${episode}`);
+		// Всегда показываем эту информацию
+		log(`FORCING Jujutsu Kaisen for episode ${episodeNumber}`);
 		
-		// Получаем сегменты для указанной серии
-		const segments = await getSkipTimes(JUJUTSU_KAISEN_MAL_ID, episode);
+		// Получаем сегменты
+		const segments = await getSkipTimes(JUJUTSU_KAISEN_MAL_ID, episodeNumber);
 		
 		if (segments.length > 0) {
 			const added = addSegmentsToItem(videoParams, segments);
 			
 			if (added > 0) {
-				log(`Added ${added} skip segments for Jujutsu Kaisen`);
+				log(`✅ SUCCESS: Added ${added} skip segments for Jujutsu Kaisen episode ${episodeNumber}`);
 				
 				// Показываем уведомление
 				if (Lampa.Noty) {
-					Lampa.Noty.show(`Добавлено ${added} меток пропуска`);
+					Lampa.Noty.show(`Добавлено ${added} меток пропуска для эпизода ${episodeNumber}`);
 				}
 				
 				// Обновляем плеер
@@ -122,6 +110,8 @@
 				
 				return true;
 			}
+		} else {
+			log(`⚠️ No skip times found for episode ${episodeNumber}`);
 		}
 		
 		return false;
@@ -132,17 +122,17 @@
 		if (!malId || !episode) return [];
 		
 		// Кэширование
-		const cacheKey = `skip_${malId}_${episode}`;
-		const cached = localStorage.getItem(cacheKey);
-		if (cached) {
-			try {
+		const cacheKey = `jjk_skip_${malId}_${episode}`;
+		try {
+			const cached = localStorage.getItem(cacheKey);
+			if (cached) {
 				const data = JSON.parse(cached);
-				if (Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
+				if (Date.now() - data.timestamp < 7 * 24 * 60 * 60 * 1000) {
 					log(`Using cached skip times for episode ${episode}`);
 					return data.segments;
 				}
-			} catch (e) {}
-		}
+			}
+		} catch (e) {}
 		
 		log(`Requesting skip times for MAL ID ${malId}, episode ${episode}`);
 		
@@ -151,9 +141,7 @@
 			const url = `${ANISKIP_API}/${malId}/${episode}?${types}&episodeLength=0`;
 			
 			const response = await fetch(url, {
-				headers: {
-					"Accept": "application/json"
-				}
+				headers: { "Accept": "application/json" }
 			});
 			
 			if (response.status === 404) {
@@ -180,16 +168,17 @@
 					return {
 						start: item.interval.startTime,
 						end: item.interval.endTime,
-						name: name,
-						type: type
+						name: name
 					};
 				}).filter(seg => seg.start && seg.end);
 				
 				// Сохраняем в кэш
-				localStorage.setItem(cacheKey, JSON.stringify({
-					segments: segments,
-					timestamp: Date.now()
-				}));
+				try {
+					localStorage.setItem(cacheKey, JSON.stringify({
+						segments: segments,
+						timestamp: Date.now()
+					}));
+				} catch (e) {}
 				
 				log(`Found ${segments.length} skip segments`);
 				return segments;
@@ -203,84 +192,67 @@
 		}
 	}
 
-	// Определяем номер серии из разных источников
-	function extractEpisodeNumber(videoParams, card) {
-		// 1. Из параметров видео
+	// Определяем номер эпизода
+	function extractEpisodeNumber(videoParams) {
+		// Пробуем разные источники
 		if (videoParams.episode || videoParams.e || videoParams.episode_number) {
 			const ep = videoParams.episode || videoParams.e || videoParams.episode_number;
-			return parseInt(ep);
+			return parseInt(ep) || 1;
 		}
 		
-		// 2. Из плейлиста
-		if (videoParams.playlist && Array.isArray(videoParams.playlist)) {
-			const url = videoParams.url;
-			const index = videoParams.playlist.findIndex(p => p.url === url);
-			if (index !== -1) {
-				return index + 1;
-			}
+		// Из плейлиста
+		if (videoParams.playlist && videoParams.url) {
+			const index = videoParams.playlist.findIndex(p => p.url === videoParams.url);
+			if (index !== -1) return index + 1;
 		}
 		
-		// 3. Из названия в логах (fallback)
-		const title = videoParams.title || "";
-		const epMatch = title.match(/(\d+)/);
-		if (epMatch) {
-			return parseInt(epMatch[1]);
-		}
-		
-		// 4. По умолчанию
+		// По умолчанию
 		return 1;
 	}
 
-	// Основная функция обработки
+	// Основная функция
 	async function processVideo(videoParams) {
 		try {
-			// Получаем карточку
-			let card = videoParams.card || videoParams.movie;
-			if (!card) {
-				const active = Lampa.Activity.active();
-				card = active?.card || active?.movie;
-			}
+			// Определяем номер эпизода
+			const episode = extractEpisodeNumber(videoParams);
 			
-			// Извлекаем номер серии
-			const episode = extractEpisodeNumber(videoParams, card);
-			log(`Processing video, episode: ${episode}`);
+			// ВАЖНО: всегда пробуем обработать как Jujutsu Kaisen
+			// независимо от названия в логах
+			log(`Starting process for episode ${episode}`);
 			
-			// Пробуем получить информацию из карточки
-			const animeInfo = getAnimeInfoFromCard(card);
-			
-			if (animeInfo) {
-				log(`Card info: "${animeInfo.title}", isAnime: ${animeInfo.isAnime}`);
-				
-				// Если это Jujutsu Kaisen, обрабатываем напрямую
-				const title = animeInfo.title.toLowerCase();
-				if (title.includes('jujutsu') || 
-					title.includes('kaisen') || 
-					title.includes('магическая') || 
-					title.includes('битва')) {
-					
-					const success = await processJujutsuKaisen(videoParams, episode);
-					if (success) return;
+			// Пробуем получить информацию о карточке
+			let cardInfo = null;
+			try {
+				// Пробуем разные способы получить карточку
+				if (videoParams.card) cardInfo = videoParams.card;
+				else if (videoParams.movie) cardInfo = videoParams.movie;
+				else {
+					const active = Lampa.Activity.active();
+					cardInfo = active?.card || active?.movie;
 				}
+			} catch (e) {}
+			
+			if (cardInfo) {
+				const title = cardInfo.title || cardInfo.original_title || cardInfo.original_name || "";
+				log(`Card title: "${title}"`);
 				
-				// Если не Jujutsu Kaisen, но похоже на аниме
-				if (animeInfo.isAnime) {
-					log(`Looks like anime, but not Jujutsu Kaisen. Title: "${animeInfo.title}"`);
-					// Можно добавить обработку других аниме
+				// Проверяем, Jujutsu Kaisen ли это
+				if (isJujutsuKaisenTitle(title)) {
+					log(`Confirmed Jujutsu Kaisen by title: "${title}"`);
+				} else {
+					log(`Title doesn't match JJK: "${title}"`);
 				}
 			} else {
-				// Если нет информации из карточки, пробуем по названию видео
-				const videoTitle = videoParams.title || "";
-				log(`No card info, video title: "${videoTitle}"`);
-				
-				// Для Jujutsu Kaisen все равно пробуем
-				const lowerTitle = videoTitle.toLowerCase();
-				if (lowerTitle.includes('магическая') || 
-					lowerTitle.includes('битва') ||
-					episode > 0) { // Если есть номер серии
-					
-					log(`Trying Jujutsu Kaisen for episode ${episode}`);
-					await processJujutsuKaisen(videoParams, episode);
-				}
+				log("No card info available");
+			}
+			
+			// ВСЕГДА пробуем обработать как Jujutsu Kaisen
+			// для эпизодов 1-24 (первый сезон)
+			if (episode >= 1 && episode <= 24) {
+				log(`Trying Jujutsu Kaisen for episode ${episode}`);
+				await processJujutsuKaisenDirectly(videoParams, episode);
+			} else {
+				log(`Episode ${episode} outside JJK S1 range, skipping`);
 			}
 			
 		} catch (error) {
@@ -290,43 +262,49 @@
 
 	// Инициализация
 	function init() {
-		if (window.lampa_jjk_fixed) return;
-		window.lampa_jjk_fixed = true;
+		if (window.lampa_jjk_final) return;
+		window.lampa_jjk_final = true;
 		
-		// Сохраняем оригинальный метод
 		const originalPlay = Lampa.Player.play;
 		
-		// Переопределяем метод
 		Lampa.Player.play = function (videoParams) {
 			// Запускаем обработку
 			setTimeout(() => {
 				processVideo(videoParams);
-			}, 1500); // Даем время загрузиться плееру
+			}, 2000); // Даем больше времени на загрузку
 			
-			// Вызываем оригинальный метод
 			return originalPlay.call(this, videoParams);
 		};
 		
-		log("Jujutsu Kaisen Skip plugin initialized");
+		log("Jujutsu Kaisen AniSkip FINAL plugin initialized");
 		
 		// Глобальные методы для отладки
-		window.JJKDebug = {
-			testEpisode: (episode) => {
+		window.JJKSkip = {
+			test: (episode) => {
 				const active = Lampa.Activity.active();
 				if (active?.videoParams) {
-					processJujutsuKaisen(active.videoParams, episode || 1);
+					processJujutsuKaisenDirectly(active.videoParams, episode || 1);
+				} else {
+					log("No active video params");
 				}
 			},
 			clearCache: () => {
 				const keys = [];
 				for (let i = 0; i < localStorage.length; i++) {
 					const key = localStorage.key(i);
-					if (key.startsWith("skip_")) {
+					if (key.startsWith("jjk_skip_")) {
 						keys.push(key);
 					}
 				}
 				keys.forEach(key => localStorage.removeItem(key));
-				log("Cache cleared");
+				log("JJK cache cleared");
+			},
+			forceEpisode: (episode) => {
+				log(`Manually forcing episode ${episode}`);
+				const active = Lampa.Activity.active();
+				if (active?.videoParams) {
+					processVideo(active.videoParams);
+				}
 			}
 		};
 	}

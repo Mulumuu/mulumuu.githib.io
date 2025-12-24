@@ -4,26 +4,14 @@
 	const ANISKIP_API = "https://api.aniskip.com/v2/skip-times";
 	const SKIP_TYPES = ["op", "ed", "recap"];
 	
-	// Добавляем кэш для улучшения производительности
-	const cache = {
-		get: (key) => {
-			try {
-				return JSON.parse(localStorage.getItem(`anime_skip_${key}`));
-			} catch {
-				return null;
-			}
-		},
-		set: (key, value) => {
-			try {
-				localStorage.setItem(`anime_skip_${key}`, JSON.stringify(value));
-			} catch {}
-		}
-	};
+	// CORS прокси для обхода ограничений
+	const CORS_PROXY = "https://corsproxy.io/?"; // или https://api.allorigins.win/raw?url=
+	const ANILIST_API = "https://graphql.anilist.co";
 
 	function log(message, showNotify = false) {
-		console.log("[AniSkip-Shikimori]: " + message);
+		console.log("[AniSkip-Fixed]: " + message);
 		if (showNotify && typeof Lampa !== "undefined" && Lampa.Noty) {
-			// Уведомления можно включить при необходимости
+			// Можно включить уведомления
 		}
 	}
 
@@ -48,179 +36,193 @@
 		return count;
 	}
 
-	// Улучшенный парсинг названия для извлечения информации об аниме
+	// Парсинг названия с улучшенной логикой
 	function parseAnimeInfo(title) {
-		const patterns = [
-			// Русские названия с серией
-			/^(.*?)\s*\((\d+)\s*серия\)/i,
-			/^(.*?)\s*-\s*(\d+)\s*серия/i,
-			/^(.*?)\s*серия\s*(\d+)/i,
-			// Английские названия
-			/^(.*?)\s*[Ee]pisode\s*(\d+)/i,
-			/^(.*?)\s*-?\s*(\d+)$/,
-			// Без номера серии
-			/^(.*?)$/
-		];
-
-		for (const pattern of patterns) {
-			const match = title.match(pattern);
-			if (match) {
-				return {
-					name: match[1].trim(),
-					episode: match[2] ? parseInt(match[2]) : 1
-				};
-			}
-		}
+		// Удаляем лишнее из названия
+		let cleanTitle = title
+			.replace(/\(\s*\d+\s*серия\s*\)/gi, "")
+			.replace(/-\s*\d+\s*серия/gi, "")
+			.replace(/серия\s*\d+/gi, "")
+			.replace(/\s*\(\s*\d{4}\s*\)/g, "")
+			.replace(/\(.*?\)/g, "")
+			.replace(/\s+/g, " ")
+			.trim();
 		
-		return { name: title, episode: 1 };
+		// Извлекаем номер эпизода
+		let episode = 1;
+		const episodeMatch = title.match(/(\d+)\s*(?:серия|серии|эпизод|episode)/i);
+		if (episodeMatch) episode = parseInt(episodeMatch[1]);
+		
+		return { name: cleanTitle, episode: episode };
 	}
 
-	// Функция для поиска shikimoriId по названию через разные источники
-	async function findShikimoriId(animeName, season = 1) {
-		const cacheKey = `shikimori_${animeName.toLowerCase().replace(/\s+/g, '_')}_s${season}`;
-		const cached = cache.get(cacheKey);
-		if (cached) return cached;
-
-		log(`Searching Shikimori ID for: "${animeName}" Season ${season}`);
-
-		// Список возможных API для поиска
-		const searchApis = [
-			// 1. Прямой запрос к Shikimori API (может требовать CORS прокси)
-			{
-				name: "Shikimori API",
-				url: `https://shikimori.me/api/animes?search=${encodeURIComponent(animeName)}&limit=5`,
-				parser: (data) => data?.[0]?.id
-			},
-			// 2. Через AniList GraphQL (хорошая альтернатива)
-			{
-				name: "AniList GraphQL",
-				url: "https://graphql.anilist.co",
+	// Получение MAL ID через AniList GraphQL (работает без CORS)
+	async function getMALIdFromAnimeName(animeName) {
+		// Кэширование
+		const cacheKey = `malid_${animeName.toLowerCase().replace(/\s+/g, '_')}`;
+		const cached = localStorage.getItem(cacheKey);
+		if (cached) return parseInt(cached);
+		
+		log(`Searching for: "${animeName}"`);
+		
+		try {
+			// Запрос к AniList GraphQL
+			const query = `
+				query ($search: String) {
+					Media(search: $search, type: ANIME) {
+						id
+						idMal
+						title {
+							romaji
+							english
+							native
+							userPreferred
+						}
+					}
+				}
+			`;
+			
+			const response = await fetch(ANILIST_API, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 					"Accept": "application/json"
 				},
 				body: JSON.stringify({
-					query: `
-						query ($search: String) {
-							Media(search: $search, type: ANIME) {
-								id
-								idMal
-								title { romaji english native }
-								synonyms
+					query: query,
+					variables: { search: animeName }
+				})
+			});
+			
+			if (!response.ok) {
+				throw new Error(`AniList API error: ${response.status}`);
+			}
+			
+			const data = await response.json();
+			
+			if (data?.data?.Media?.idMal) {
+				const malId = data.data.Media.idMal;
+				localStorage.setItem(cacheKey, malId.toString());
+				log(`Found MAL ID: ${malId} for "${animeName}"`);
+				return malId;
+			}
+			
+			// Если не нашли по точному названию, пробуем поиск
+			log("Exact match not found, trying search...");
+			
+			const searchQuery = `
+				query ($search: String) {
+					Page(page: 1, perPage: 5) {
+						media(search: $search, type: ANIME) {
+							id
+							idMal
+							title {
+								romaji
+								english
+								native
 							}
 						}
-					`,
+					}
+				}
+			`;
+			
+			const searchResponse = await fetch(ANILIST_API, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					"Accept": "application/json"
+				},
+				body: JSON.stringify({
+					query: searchQuery,
 					variables: { search: animeName }
-				}),
-				parser: (data) => data?.data?.Media?.idMal // MAL ID, но подойдет
-			},
-			// 3. Через Kitsu API
-			{
-				name: "Kitsu API",
-				url: `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(animeName)}&page[limit]=5`,
-				parser: (data) => data?.data?.[0]?.id
-			}
-		];
-
-		for (const api of searchApis) {
-			try {
-				log(`Trying ${api.name}...`);
-				
-				const options = {
-					method: api.method || "GET",
-					headers: api.headers || {
-						"User-Agent": "LampaAnimeSkip/1.0"
-					}
-				};
-				
-				if (api.body) options.body = api.body;
-				
-				const response = await fetch(api.url, options);
-				
-				if (response.ok) {
-					const data = await response.json();
-					const id = api.parser(data);
-					
-					if (id) {
-						log(`Found ID via ${api.name}: ${id}`);
-						cache.set(cacheKey, id);
-						return id;
+				})
+			});
+			
+			const searchData = await searchResponse.json();
+			
+			if (searchData?.data?.Page?.media?.length > 0) {
+				// Ищем лучшее совпадение
+				const media = searchData.data.Page.media;
+				for (const item of media) {
+					if (item.idMal) {
+						const malId = item.idMal;
+						localStorage.setItem(cacheKey, malId.toString());
+						log(`Found MAL ID in search: ${malId} for "${item.title.romaji || item.title.english}"`);
+						return malId;
 					}
 				}
-			} catch (error) {
-				log(`${api.name} error: ${error.message}`);
-				continue;
 			}
+			
+			return null;
+			
+		} catch (error) {
+			log(`AniList search error: ${error.message}`);
+			return null;
 		}
-
-		// Если ничего не нашли, пробуем закодированные названия
-		const encodedNames = [
-			encodeURIComponent(animeName),
-			encodeURIComponent(animeName.replace(/[^a-zA-Zа-яА-Я0-9\s]/g, " ")),
-			encodeURIComponent(animeName.split(" ")[0]) // Первое слово
-		];
-
-		for (const encodedName of encodedNames) {
-			try {
-				const response = await fetch(
-					`https://api.aniskip.com/v2/search?query=${encodedName}&limit=1`
-				);
-				if (response.ok) {
-					const data = await response.json();
-					if (data?.results?.[0]?.malId) {
-						const malId = data.results[0].malId;
-						log(`Found via AniSkip search: MAL ID ${malId}`);
-						cache.set(cacheKey, malId);
-						return malId; // AniSkip принимает и MAL ID
-					}
-				}
-			} catch (error) {
-				continue;
-			}
-		}
-
-		log("Could not find Shikimori/MAL ID");
-		return null;
 	}
 
-	// Получение сегментов пропуска
-	async function getSkipSegments(animeId, episode) {
-		const cacheKey = `segments_${animeId}_${episode}`;
-		const cached = cache.get(cacheKey);
+	// Получение сегментов пропуска через AniSkip
+	async function getSkipSegments(malId, episode) {
+		if (!malId || !episode) return [];
+		
+		const cacheKey = `segments_${malId}_${episode}`;
+		const cached = localStorage.getItem(cacheKey);
 		if (cached) {
-			log(`Using cached segments for episode ${episode}`);
-			return cached;
+			try {
+				return JSON.parse(cached);
+			} catch {
+				// ignore
+			}
 		}
-
+		
+		// AniSkip принимает как shikimori_id, так и mal_id
+		// Обычно это одно и то же число для большинства аниме
 		const types = SKIP_TYPES.map((t) => "types[]=" + t).join("&");
-		const url = `${ANISKIP_API}/${animeId}/${episode}?${types}&episodeLength=0`;
+		const url = `${ANISKIP_API}/${malId}/${episode}?${types}&episodeLength=0`;
+		
+		log(`Requesting skip times for MAL ID ${malId}, episode ${episode}`);
 		
 		try {
-			const response = await fetch(url);
+			// Используем прокси для обхода CORS если нужно
+			const fetchUrl = url; // Можно использовать CORS_PROXY + encodeURIComponent(url) если нужно
+			
+			const response = await fetch(fetchUrl, {
+				headers: {
+					"Accept": "application/json",
+					"User-Agent": "LampaAnimeSkip/1.0"
+				}
+			});
 			
 			if (response.status === 404) {
-				log(`No skip times for episode ${episode}`);
+				log(`No skip times found for episode ${episode}`);
 				return [];
 			}
 			
 			if (!response.ok) {
-				log(`AniSkip API error: ${response.status}`);
+				log(`AniSkip error: ${response.status}`);
 				return [];
 			}
 			
 			const data = await response.json();
 			
 			if (data.found && data.results?.length > 0) {
-				const segments = data.results.map((s) => ({
-					start: s.interval.startTime ?? s.interval.start_time,
-					end: s.interval.endTime ?? s.interval.end_time,
-					type: s.skipType || s.skip_type,
-					name: getSegmentName(s.skipType || s.skip_type)
-				})).filter(s => s.start && s.end);
+				const segments = data.results.map((item) => {
+					const type = (item.skipType || item.skip_type || "").toLowerCase();
+					let name = "Пропустить";
+					if (type.includes("op")) name = "Опенинг";
+					else if (type.includes("ed")) name = "Эндинг";
+					else if (type === "recap") name = "Рекап";
+					
+					return {
+						start: item.interval.startTime ?? item.interval.start_time,
+						end: item.interval.endTime ?? item.interval.end_time,
+						name: name
+					};
+				}).filter(s => s.start && s.end);
 				
-				cache.set(cacheKey, segments);
-				log(`Found ${segments.length} segments for episode ${episode}`);
+				// Сохраняем в кэш
+				localStorage.setItem(cacheKey, JSON.stringify(segments));
+				log(`Found ${segments.length} skip segments`);
 				return segments;
 			}
 			
@@ -232,58 +234,103 @@
 		}
 	}
 
-	function getSegmentName(type) {
-		switch (type?.toLowerCase()) {
-			case 'op': return 'Опенинг';
-			case 'ed': return 'Эндинг';
-			case 'recap': return 'Рекап';
-			default: return 'Пропустить';
+	// Проверка, является ли контент аниме
+	function isAnimeContent(card, title) {
+		if (!card) {
+			// Проверяем по названию
+			const lowerTitle = title.toLowerCase();
+			const animeKeywords = [
+				'магическая', 'битва', 'аниме', 'anime',
+				'ниндзя', 'дракон', 'самурай', 'магия',
+				'shounen', 'shoujo', 'сёнен', 'сёдзё'
+			];
+			
+			return animeKeywords.some(keyword => lowerTitle.includes(keyword));
 		}
+		
+		// Проверяем язык
+		const lang = (card.original_language || "").toLowerCase();
+		const isAsian = ['ja', 'zh', 'cn', 'ko'].includes(lang);
+		
+		// Проверяем жанры
+		const isAnimation = card.genres?.some(g => 
+			g.id === 16 || 
+			(g.name && g.name.toLowerCase().includes('аниме')) ||
+			(g.name && g.name.toLowerCase().includes('animation'))
+		);
+		
+		return isAsian || isAnimation;
 	}
 
 	// Основная функция обработки
 	async function processAnimeSkip(videoParams) {
 		try {
-			// Пытаемся получить карточку с метаданными
+			// Получаем информацию о видео
 			let card = videoParams.movie || videoParams.card;
 			if (!card) {
 				const active = Lampa.Activity.active();
 				if (active) card = active.movie || active.card;
 			}
 			
-			// Если нет карточки, используем заголовок из параметров
+			// Название из параметров или карточки
 			const title = card?.title || videoParams.title || "";
-			log(`Processing: ${title}`);
 			
-			// Парсим информацию из названия
+			// Парсим информацию
 			const animeInfo = parseAnimeInfo(title);
-			log(`Parsed: "${animeInfo.name}", Episode: ${animeInfo.episode}`);
+			log(`Processing: "${animeInfo.name}", Episode: ${animeInfo.episode}`);
 			
-			// Определяем, аниме ли это
-			const isLikelyAnime = isAnimeContent(card, animeInfo.name);
-			
-			if (!isLikelyAnime) {
+			// Проверяем, аниме ли это
+			if (!isAnimeContent(card, animeInfo.name)) {
 				log("Not an anime, skipping");
 				return;
 			}
 			
-			// Ищем ID аниме
-			const animeId = await findShikimoriId(animeInfo.name, 1); // season = 1
+			// Для "МАГИЧЕСКАЯ БИТВА" - это Jujutsu Kaisen (MAL ID: 40748)
+			// Можно добавить ручной маппинг для популярных аниме
+			const manualMapping = {
+				"магическая битва": 40748, // Jujutsu Kaisen
+				"jujutsu kaisen": 40748,
+				"джуцзу кайсен": 40748,
+				"атака титанов": 16498, // Attack on Titan
+				"attack on titan": 16498,
+				"наруто": 20,
+				"naruto": 20,
+				"ван пис": 21, // One Piece
+				"one piece": 21,
+				"блич": 269, // Bleach
+				"bleach": 269
+			};
 			
-			if (!animeId) {
-				log("Could not identify anime");
+			let malId = null;
+			const lowerName = animeInfo.name.toLowerCase();
+			
+			// Проверяем ручной маппинг
+			for (const [key, id] of Object.entries(manualMapping)) {
+				if (lowerName.includes(key)) {
+					malId = id;
+					log(`Manual mapping found: ${animeInfo.name} -> MAL ID: ${malId}`);
+					break;
+				}
+			}
+			
+			// Если нет в маппинге, ищем через API
+			if (!malId) {
+				malId = await getMALIdFromAnimeName(animeInfo.name);
+			}
+			
+			if (!malId) {
+				log(`Could not find MAL ID for "${animeInfo.name}"`);
 				return;
 			}
 			
 			// Получаем сегменты пропуска
-			const segments = await getSkipSegments(animeId, animeInfo.episode);
+			const segments = await getSkipSegments(malId, animeInfo.episode);
 			
 			if (segments.length > 0) {
-				// Добавляем сегменты в параметры видео
 				const added = addSegmentsToItem(videoParams, segments);
 				
 				if (added > 0) {
-					log(`Added ${added} skip segments`);
+					log(`Successfully added ${added} skip segments`);
 					
 					// Показываем уведомление
 					if (Lampa.Noty) {
@@ -296,63 +343,60 @@
 					}
 				}
 			} else {
-				log("No skip segments available");
+				log("No skip segments available for this episode");
 			}
 			
 		} catch (error) {
-			log(`Processing error: ${error.message}`);
+			log(`Error: ${error.message}`);
 		}
-	}
-
-	// Функция для определения, является ли контент аниме
-	function isAnimeContent(card, title) {
-		if (!card) {
-			// Если нет карточки, проверяем по названию
-			const animeKeywords = [
-				'аниме', 'anime', 'тентакли', 'магическая',
-				'битва', 'shounen', 'shoujo', 'сенен',
-				'дракон', 'ниндзя', 'самурай', 'магия'
-			];
-			
-			const lowerTitle = title.toLowerCase();
-			return animeKeywords.some(keyword => lowerTitle.includes(keyword));
-		}
-		
-		// Проверяем язык
-		const lang = (card.original_language || "").toLowerCase();
-		const isAsian = ['ja', 'zh', 'cn', 'ko'].includes(lang);
-		
-		// Проверяем жанры
-		const isAnimation = card.genres?.some(g => 
-			g.id === 16 || 
-			(g.name && g.name.toLowerCase().includes('аниме')) ||
-			(g.name && g.name.toLowerCase().includes('anime'))
-		);
-		
-		return isAsian || isAnimation;
 	}
 
 	// Инициализация плагина
 	function init() {
-		if (window.lampa_anime_skip_v2) return;
-		window.lampa_anime_skip_v2 = true;
+		if (window.lampa_anime_skip_fixed) return;
+		window.lampa_anime_skip_fixed = true;
 		
 		const originalPlay = Lampa.Player.play;
 		
 		Lampa.Player.play = function (videoParams) {
-			// Запускаем поиск сегментов в фоне
+			// Запускаем поиск сегментов
 			setTimeout(() => {
-				processAnimeSkip(videoParams).catch(console.error);
-			}, 100);
+				processAnimeSkip(videoParams).catch(e => {
+					console.error("[AniSkip] Error:", e);
+				});
+			}, 500); // Небольшая задержка для стабильности
 			
 			// Воспроизводим видео
 			return originalPlay.call(this, videoParams);
 		};
 		
-		log("Anime Skip Plugin initialized");
+		log("AniSkip Plugin initialized (fixed version)");
+		
+		// Добавляем ручное обновление сегментов
+		if (window.Lampa) {
+			window.Lampa.AniSkip = {
+				refresh: () => {
+					const active = Lampa.Activity.active();
+					if (active && active.videoParams) {
+						processAnimeSkip(active.videoParams);
+					}
+				},
+				clearCache: () => {
+					const keys = [];
+					for (let i = 0; i < localStorage.length; i++) {
+						const key = localStorage.key(i);
+						if (key.startsWith("malid_") || key.startsWith("segments_")) {
+							keys.push(key);
+						}
+					}
+					keys.forEach(key => localStorage.removeItem(key));
+					log("Cache cleared");
+				}
+			};
+		}
 	}
 
-	// Запуск при готовности Lampa
+	// Запуск
 	if (window.Lampa?.Player) {
 		init();
 	} else {

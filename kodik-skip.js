@@ -5,32 +5,106 @@
 	const SKIP_TYPES = ["op", "ed", "recap"];
 
 	function log(message) {
-		console.log("[AniSkip-JJK]: " + message);
+		console.log("[AniSkip-JJK-FIXED]: " + message);
 	}
 
-	function addSegmentsToItem(item, segments) {
-		if (!item || !segments || segments.length === 0) return 0;
+	// Ключевая функция: добавляет сегменты в Lampa
+	function injectSkipSegments(videoParams, segments) {
+		if (!segments || segments.length === 0) return false;
 		
-		item.segments = item.segments || {};
-		item.segments.skip = item.segments.skip || [];
+		log(`Injecting ${segments.length} segments to player`);
 		
-		let added = 0;
-		segments.forEach(seg => {
-			const exists = item.segments.skip.some(s => 
-				Math.abs(s.start - seg.start) < 1
-			);
-			
-			if (!exists) {
-				item.segments.skip.push({
-					start: seg.start,
-					end: seg.end,
-					name: seg.name || "Пропустить"
-				});
-				added++;
+		try {
+			// Метод 1: Прямая инъекция в videoParams (работает в большинстве случаев)
+			if (videoParams) {
+				// Создаем объект segments если его нет
+				videoParams.segments = videoParams.segments || {};
+				videoParams.segments.skip = segments;
+				
+				log("Segments added to videoParams");
 			}
-		});
-		
-		return added;
+			
+			// Метод 2: Используем Lampa Player API для отправки сегментов
+			// Это основной метод, который должен работать
+			if (window.Lampa && Lampa.Player) {
+				// Вариант A: Через listener (если доступен)
+				if (Lampa.Player.listener) {
+					Lampa.Player.listener.send("segments", { 
+						skip: segments,
+						type: "skip"
+					});
+					log("Segments sent via Player.listener");
+				}
+				
+				// Вариант B: Прямое обновление активного плеера
+				const player = Lampa.Player.active();
+				if (player && player.segments) {
+					player.segments.skip = segments;
+					log("Segments updated in active player");
+				}
+				
+				// Вариант C: Глобальное событие
+				window.dispatchEvent(new CustomEvent('player-segments-update', {
+					detail: { segments: segments }
+				}));
+				
+				// Вариант D: Обновление через Activity
+				const activity = Lampa.Activity.active();
+				if (activity && activity.videoParams) {
+					activity.videoParams.segments = activity.videoParams.segments || {};
+					activity.videoParams.segments.skip = segments;
+					log("Segments updated in activity");
+				}
+			}
+			
+			// Метод 3: Используем существующий API для меток времени
+			// Проверяем, есть ли плагин меток времени
+			if (window.Lampa && Lampa.Timeline) {
+				try {
+					// Добавляем сегменты как временные метки
+					segments.forEach(segment => {
+						Lampa.Timeline.add({
+							time: segment.start,
+							duration: segment.end - segment.start,
+							title: segment.name,
+							type: "skip"
+						});
+					});
+					log("Segments added via Timeline API");
+				} catch (e) {
+					log("Timeline API error: " + e.message);
+				}
+			}
+			
+			// Метод 4: Используем DOM события (работает с большинством плееров)
+			try {
+				// Создаем событие для видеоплеера
+				const videoElement = document.querySelector('video');
+				if (videoElement) {
+					const event = new CustomEvent('segmentsloaded', {
+						detail: {
+							segments: segments,
+							type: 'skip'
+						}
+					});
+					videoElement.dispatchEvent(event);
+					log("DOM event dispatched to video element");
+				}
+			} catch (e) {
+				log("DOM event error: " + e.message);
+			}
+			
+			// Показываем уведомление пользователю
+			if (Lampa.Noty) {
+				Lampa.Noty.show(`Добавлено ${segments.length} меток пропуска`);
+			}
+			
+			return true;
+			
+		} catch (error) {
+			log("Error injecting segments: " + error.message);
+			return false;
+		}
 	}
 
 	// Проверяем все варианты названий Jujutsu Kaisen
@@ -38,80 +112,17 @@
 		if (!title) return false;
 		
 		const lowerTitle = title.toLowerCase();
-		
-		// Все возможные названия Jujutsu Kaisen
 		const jjkNames = [
-			// Английские
-			'jujutsu kaisen',
-			'jujutsu',
-			'kaisen',
-			'jjk',
-			
-			// Русские
-			'магическая битва',
-			'магическая',
-			'битва',
-			'джуцзу кайсен',
-			
-			// Японские
-			'呪術廻戦',
-			'呪術回戦',
-			'じゅじゅつかいせん',
-			'じゅつかいせん',
-			
-			// Китайские
-			'咒术回战',
-			'呪術迴戰'
+			'jujutsu kaisen', 'jujutsu', 'kaisen', 'jjk',
+			'магическая битва', 'магическая', 'битва', 'джуцзу кайсен',
+			'呪術廻戦', '呪術回戦', 'じゅじゅつかいせん', 'じゅつかいせん',
+			'咒术回战', '呪術迴戰'
 		];
 		
-		// Проверяем каждое название
 		for (const name of jjkNames) {
 			if (title.includes(name) || lowerTitle.includes(name.toLowerCase())) {
 				return true;
 			}
-		}
-		
-		// Также проверяем части названия
-		const words = title.split(/[\s\-_.,:;]/);
-		for (const word of words) {
-			if (word === '呪術' || word === '廻戦' || word === '回戦') {
-				return true;
-			}
-		}
-		
-		return false;
-	}
-
-	// Главная функция для Jujutsu Kaisen
-	async function processJujutsuKaisenDirectly(videoParams, episodeNumber) {
-		const JUJUTSU_KAISEN_MAL_ID = 40748;
-		
-		// Всегда показываем эту информацию
-		log(`FORCING Jujutsu Kaisen for episode ${episodeNumber}`);
-		
-		// Получаем сегменты
-		const segments = await getSkipTimes(JUJUTSU_KAISEN_MAL_ID, episodeNumber);
-		
-		if (segments.length > 0) {
-			const added = addSegmentsToItem(videoParams, segments);
-			
-			if (added > 0) {
-				log(`✅ SUCCESS: Added ${added} skip segments for Jujutsu Kaisen episode ${episodeNumber}`);
-				
-				// Показываем уведомление
-				if (Lampa.Noty) {
-					Lampa.Noty.show(`Добавлено ${added} меток пропуска для эпизода ${episodeNumber}`);
-				}
-				
-				// Обновляем плеер
-				if (Lampa.Player.listener) {
-					Lampa.Player.listener.send("segments", { skip: videoParams.segments.skip });
-				}
-				
-				return true;
-			}
-		} else {
-			log(`⚠️ No skip times found for episode ${episodeNumber}`);
 		}
 		
 		return false;
@@ -141,7 +152,10 @@
 			const url = `${ANISKIP_API}/${malId}/${episode}?${types}&episodeLength=0`;
 			
 			const response = await fetch(url, {
-				headers: { "Accept": "application/json" }
+				headers: { 
+					"Accept": "application/json",
+					"User-Agent": "LampaAnimeSkip/2.0"
+				}
 			});
 			
 			if (response.status === 404) {
@@ -168,7 +182,10 @@
 					return {
 						start: item.interval.startTime,
 						end: item.interval.endTime,
-						name: name
+						name: name,
+						type: type,
+						color: type.includes("op") ? "#FF6B6B" : 
+							   type.includes("ed") ? "#4ECDC4" : "#FFD166"
 					};
 				}).filter(seg => seg.start && seg.end);
 				
@@ -206,8 +223,46 @@
 			if (index !== -1) return index + 1;
 		}
 		
-		// По умолчанию
+		// Из названия
+		const title = videoParams.title || "";
+		const epMatch = title.match(/(\d+)/);
+		if (epMatch) return parseInt(epMatch[1]);
+		
 		return 1;
+	}
+
+	// Главная функция обработки
+	async function processJujutsuKaisen(videoParams, episodeNumber) {
+		const JUJUTSU_KAISEN_MAL_ID = 40748;
+		
+		log(`Processing Jujutsu Kaisen episode ${episodeNumber}`);
+		
+		// Получаем сегменты
+		const segments = await getSkipTimes(JUJUTSU_KAISEN_MAL_ID, episodeNumber);
+		
+		if (segments.length > 0) {
+			// Ключевое изменение: используем новую функцию инъекции
+			const success = injectSkipSegments(videoParams, segments);
+			
+			if (success) {
+				log(`✅ SUCCESS: ${segments.length} skip segments injected`);
+				
+				// Дополнительно: сохраняем сегменты для других вызовов
+				window._lastSkipSegments = {
+					segments: segments,
+					timestamp: Date.now(),
+					episode: episodeNumber
+				};
+				
+				return true;
+			} else {
+				log(`❌ FAILED: Could not inject segments`);
+			}
+		} else {
+			log(`⚠️ No skip times found for episode ${episodeNumber}`);
+		}
+		
+		return false;
 	}
 
 	// Основная функция
@@ -215,15 +270,11 @@
 		try {
 			// Определяем номер эпизода
 			const episode = extractEpisodeNumber(videoParams);
-			
-			// ВАЖНО: всегда пробуем обработать как Jujutsu Kaisen
-			// независимо от названия в логах
 			log(`Starting process for episode ${episode}`);
 			
-			// Пробуем получить информацию о карточке
+			// Проверяем карточку
 			let cardInfo = null;
 			try {
-				// Пробуем разные способы получить карточку
 				if (videoParams.card) cardInfo = videoParams.card;
 				else if (videoParams.movie) cardInfo = videoParams.movie;
 				else {
@@ -236,21 +287,15 @@
 				const title = cardInfo.title || cardInfo.original_title || cardInfo.original_name || "";
 				log(`Card title: "${title}"`);
 				
-				// Проверяем, Jujutsu Kaisen ли это
 				if (isJujutsuKaisenTitle(title)) {
 					log(`Confirmed Jujutsu Kaisen by title: "${title}"`);
-				} else {
-					log(`Title doesn't match JJK: "${title}"`);
 				}
-			} else {
-				log("No card info available");
 			}
 			
-			// ВСЕГДА пробуем обработать как Jujutsu Kaisen
-			// для эпизодов 1-24 (первый сезон)
+			// Обрабатываем как Jujutsu Kaisen для эпизодов 1-24
 			if (episode >= 1 && episode <= 24) {
 				log(`Trying Jujutsu Kaisen for episode ${episode}`);
-				await processJujutsuKaisenDirectly(videoParams, episode);
+				await processJujutsuKaisen(videoParams, episode);
 			} else {
 				log(`Episode ${episode} outside JJK S1 range, skipping`);
 			}
@@ -260,34 +305,100 @@
 		}
 	}
 
-	// Инициализация
+	// Инициализация с правильным перехватом
 	function init() {
-		if (window.lampa_jjk_final) return;
-		window.lampa_jjk_final = true;
+		if (window.lampa_jjk_injected) return;
+		window.lampa_jjk_injected = true;
 		
-		const originalPlay = Lampa.Player.play;
+		log("Jujutsu Kaisen Skip Plugin INIT");
 		
-		Lampa.Player.play = function (videoParams) {
-			// Запускаем обработку
-			setTimeout(() => {
-				processVideo(videoParams);
-			}, 2000); // Даем больше времени на загрузку
+		// Вариант 1: Перехват Player.play (как в оригинальном скрипте)
+		if (Lampa.Player && Lampa.Player.play) {
+			const originalPlay = Lampa.Player.play;
 			
-			return originalPlay.call(this, videoParams);
-		};
+			Lampa.Player.play = function (videoParams) {
+				log("Player.play intercepted");
+				
+				// Запускаем обработку после небольшой задержки
+				setTimeout(() => {
+					processVideo(videoParams);
+				}, 1000);
+				
+				// Вызываем оригинальный метод
+				return originalPlay.call(this, videoParams);
+			};
+			
+			log("Player.play interception successful");
+		}
 		
-		log("Jujutsu Kaisen AniSkip FINAL plugin initialized");
+		// Вариант 2: Слушаем события плеера
+		document.addEventListener('player-video-start', function (e) {
+			log("Player video start event");
+			if (e.detail && e.detail.params) {
+				setTimeout(() => {
+					processVideo(e.detail.params);
+				}, 1500);
+			}
+		});
+		
+		// Вариант 3: Периодическая проверка активного видео
+		let checkInterval = null;
+		let lastProcessedUrl = '';
+		
+		function checkActiveVideo() {
+			try {
+				const activity = Lampa.Activity.active();
+				if (activity && activity.videoParams) {
+					const currentUrl = activity.videoParams.url || '';
+					if (currentUrl && currentUrl !== lastProcessedUrl) {
+						log(`New video detected: ${currentUrl.substring(0, 50)}...`);
+						lastProcessedUrl = currentUrl;
+						processVideo(activity.videoParams);
+					}
+				}
+			} catch (e) {}
+		}
+		
+		// Запускаем проверку каждые 3 секунды
+		checkInterval = setInterval(checkActiveVideo, 3000);
 		
 		// Глобальные методы для отладки
-		window.JJKSkip = {
-			test: (episode) => {
-				const active = Lampa.Activity.active();
-				if (active?.videoParams) {
-					processJujutsuKaisenDirectly(active.videoParams, episode || 1);
+		window.JJKSkipDebug = {
+			injectTestSegments: () => {
+				const testSegments = [
+					{ start: 85, end: 105, name: "Опенинг", type: "op" },
+					{ start: 1320, end: 1340, name: "Эндинг", type: "ed" }
+				];
+				
+				const activity = Lampa.Activity.active();
+				if (activity?.videoParams) {
+					const success = injectSkipSegments(activity.videoParams, testSegments);
+					log(`Test injection: ${success ? 'SUCCESS' : 'FAILED'}`);
 				} else {
-					log("No active video params");
+					log("No active video for test");
 				}
 			},
+			
+			forceInject: (episode) => {
+				const activity = Lampa.Activity.active();
+				if (activity?.videoParams) {
+					processJujutsuKaisen(activity.videoParams, episode || 1);
+				}
+			},
+			
+			checkPlayerAPI: () => {
+				log("=== Lampa Player API Check ===");
+				log(`Lampa.Player: ${!!Lampa.Player}`);
+				log(`Lampa.Player.listener: ${!!Lampa.Player?.listener}`);
+				log(`Lampa.Player.active(): ${!!Lampa.Player?.active()}`);
+				log(`Lampa.Activity.active(): ${!!Lampa.Activity?.active()}`);
+				
+				const activity = Lampa.Activity.active();
+				if (activity?.videoParams) {
+					log(`VideoParams segments: ${!!activity.videoParams.segments}`);
+				}
+			},
+			
 			clearCache: () => {
 				const keys = [];
 				for (let i = 0; i < localStorage.length; i++) {
@@ -298,22 +409,19 @@
 				}
 				keys.forEach(key => localStorage.removeItem(key));
 				log("JJK cache cleared");
-			},
-			forceEpisode: (episode) => {
-				log(`Manually forcing episode ${episode}`);
-				const active = Lampa.Activity.active();
-				if (active?.videoParams) {
-					processVideo(active.videoParams);
-				}
 			}
 		};
+		
+		log("✅ Jujutsu Kaisen Skip Plugin fully initialized");
 	}
 
-	// Запускаем
+	// Запускаем когда Lampa готова
 	if (window.Lampa && window.Lampa.Player) {
-		init();
+		setTimeout(init, 2000); // Даем время на полную загрузку
 	} else {
-		window.document.addEventListener("app_ready", init);
+		window.document.addEventListener("app_ready", function () {
+			setTimeout(init, 2000);
+		});
 	}
 
 })();

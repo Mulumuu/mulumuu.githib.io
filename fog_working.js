@@ -939,4 +939,124 @@
         }
         
         // =========================================
-        // ЧАСТИЦЫ И АНИМАЦИЯ (ОПТИМИЗИРОВАНА ДЛ
+        // ЧАСТИЦЫ И АНИМАЦИЯ (ОПТИМИЗИРОВАНА ДЛЯ TV)
+        // =========================================
+        initParticles() {
+            this.particles = [];
+            const count = Math.round(this.config.particleCount * this.config.density);
+            
+            for (let i = 0; i < count; i++) {
+                this.particles.push(this.createParticle());
+            }
+        }
+        
+        createParticle() {
+            const color = this.config.colors[this.config.color];
+            const baseSpeed = 0.1 * this.config.speed;
+            
+            return {
+                x: Math.random() * window.innerWidth,
+                y: Math.random() * window.innerHeight,
+                size: 30 + Math.random() * 70 * this.config.opacity,
+                speedX: (Math.random() - 0.5) * baseSpeed,
+                speedY: (Math.random() - 0.5) * baseSpeed,
+                color: color,
+                opacity: 0.03 + Math.random() * 0.04 * this.config.opacity
+            };
+        }
+        
+        updateParticles() {
+            if (this.enabled) {
+                this.initParticles();
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            }
+        }
+        
+        animate() {
+            if (!this.enabled || !this.ctx || !this.canvas) return;
+            
+            // Легкий fade эффект для плавности
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.02)';
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            
+            this.particles.forEach(particle => {
+                // Плавное движение
+                particle.x += particle.speedX;
+                particle.y += particle.speedY;
+                
+                // Легкий дрейф для естественности
+                particle.speedX += (Math.random() - 0.5) * 0.005;
+                particle.speedY += (Math.random() - 0.5) * 0.005;
+                
+                // Ограничиваем скорость
+                particle.speedX = Math.max(-0.2, Math.min(0.2, particle.speedX));
+                particle.speedY = Math.max(-0.2, Math.min(0.2, particle.speedY));
+                
+                // Возвращаем частицы на экран
+                if (particle.x < -100) particle.x = this.canvas.width + 100;
+                if (particle.x > this.canvas.width + 100) particle.x = -100;
+                if (particle.y < -100) particle.y = this.canvas.height + 100;
+                if (particle.y > this.canvas.height + 100) particle.y = -100;
+                
+                // Рисуем частицу с градиентом
+                const gradient = this.ctx.createRadialGradient(
+                    particle.x, particle.y, 0,
+                    particle.x, particle.y, particle.size
+                );
+                
+                gradient.addColorStop(0, `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${particle.opacity})`);
+                gradient.addColorStop(1, `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, 0)`);
+                
+                this.ctx.beginPath();
+                this.ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+                this.ctx.fillStyle = gradient;
+                this.ctx.fill();
+            });
+            
+            this.animationId = requestAnimationFrame(() => this.animate());
+        }
+        
+        start() {
+            if (this.enabled) return;
+            
+            this.enabled = true;
+            this.canvas.style.display = 'block';
+            this.resizeCanvas();
+            this.animate();
+            
+            console.log('[FOG TV] Effect started (background)');
+        }
+        
+        stop() {
+            if (!this.enabled) return;
+            
+            this.enabled = false;
+            if (this.animationId) {
+                cancelAnimationFrame(this.animationId);
+            }
+            this.canvas.style.display = 'none';
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            
+            console.log('[FOG TV] Effect stopped');
+        }
+        
+        closeSettingsPanel() {
+            if (this.settingsPanel) {
+                this.settingsPanel.remove();
+                this.settingsPanel = null;
+            }
+            this.settingsItems = [];
+            document.body.style.overflow = '';
+        }
+    }
+    
+    // Автоматическая инициализация
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            new FogWorkingTV();
+        });
+    } else {
+        new FogWorkingTV();
+    }
+    
+})();

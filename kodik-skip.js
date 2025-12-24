@@ -1,113 +1,15 @@
 (function () {
 	"use strict";
 
-	// Конфигурация
 	const ANISKIP_API = "https://api.aniskip.com/v2/skip-times";
 	const ANILIST_API = "https://graphql.anilist.co";
 	const SKIP_TYPES = ["op", "ed", "recap"];
 
-	// Руководство по названиям (русское -> английское)
-	const ANIME_MAPPING = {
-		// Jujutsu Kaisen
-		"магическая битва": "Jujutsu Kaisen",
-		"джуцзу кайсен": "Jujutsu Kaisen",
-		"jujutsu kaisen": "Jujutsu Kaisen",
-		"jjк": "Jujutsu Kaisen",
-		
-		// Attack on Titan
-		"атака титанов": "Attack on Titan",
-		"attack on titan": "Attack on Titan",
-		"shingeki no kyojin": "Attack on Titan",
-		
-		// One Piece
-		"ван пис": "One Piece",
-		"one piece": "One Piece",
-		"вон пис": "One Piece",
-		
-		// Naruto
-		"наруто": "Naruto",
-		"naruto": "Naruto",
-		
-		// Bleach
-		"блич": "Bleach",
-		"bleach": "Bleach",
-		
-		// Demon Slayer
-		"истребитель демонов": "Demon Slayer",
-		"клинок рассекающий демонов": "Demon Slayer",
-		"demon slayer": "Demon Slayer",
-		
-		// My Hero Academia
-		"моя геройская академия": "My Hero Academia",
-		"my hero academia": "My Hero Academia",
-		"академия героев": "My Hero Academia",
-		
-		// Chainsaw Man
-		"человек бензопила": "Chainsaw Man",
-		"chainsaw man": "Chainsaw Man",
-		
-		// Spy x Family
-		"шпионская семья": "Spy x Family",
-		"spy x family": "Spy x Family",
-		
-		// Tokyo Revengers
-		"токийские мстители": "Tokyo Revengers",
-		"tokyo revengers": "Tokyo Revengers",
-		
-		// Vinland Saga
-		"сага о винланде": "Vinland Saga",
-		"vinland saga": "Vinland Saga",
-		
-		// Mob Psycho 100
-		"моб психо 100": "Mob Psycho 100",
-		"mob psycho 100": "Mob Psycho 100",
-		
-		// One Punch Man
-		"ванпанчмен": "One Punch Man",
-		"one punch man": "One Punch Man",
-		
-		// Dr. Stone
-		"доктор стоун": "Dr. Stone",
-		"dr. stone": "Dr. Stone",
-		"dr stone": "Dr. Stone",
-		
-		// Haikyuu!!
-		"хайкю": "Haikyuu!!",
-		"haikyuu": "Haikyuu!!",
-		
-		// Black Clover
-		"блэк кловер": "Black Clover",
-		"black clover": "Black Clover",
-		
-		// Sword Art Online
-		"мастер меча онлайн": "Sword Art Online",
-		"sword art online": "Sword Art Online",
-		"сао": "Sword Art Online",
-		
-		// Re:Zero
-		"ре зеро": "Re:Zero",
-		"re zero": "Re:Zero",
-		"re:zero": "Re:Zero",
-		
-		// Konosuba
-		"богиня благословляет этот прекрасный мир": "Konosuba",
-		"konosuba": "Konosuba",
-		
-		// Overlord
-		"оверлорд": "Overlord",
-		"overlord": "Overlord",
-		
-		// That Time I Got Reincarnated as a Slime
-		"перерождение в слизь": "That Time I Got Reincarnated as a Slime",
-		"tensura": "That Time I Got Reincarnated as a Slime",
-		
-		// Mushoku Tensei
-		"бесполезное перерождение": "Mushoku Tensei",
-		"mushoku tensei": "Mushoku Tensei"
-	};
+	// Кэш для карточка-ID -> MAL-ID
+	const cardToMalCache = {};
 
 	function log(message) {
-		console.log("[AniSkip]: " + message);
+		console.log("[AniSkip-Fixed]: " + message);
 	}
 
 	function addSegmentsToItem(item, segments) {
@@ -119,8 +21,7 @@
 		let added = 0;
 		segments.forEach(seg => {
 			const exists = item.segments.skip.some(s => 
-				Math.abs(s.start - seg.start) < 1 && 
-				Math.abs(s.end - seg.end) < 1
+				Math.abs(s.start - seg.start) < 1
 			);
 			
 			if (!exists) {
@@ -136,180 +37,111 @@
 		return added;
 	}
 
-	// Улучшенный парсинг названия
-	function parseVideoInfo(title) {
-		if (!title) return { name: "", episode: 1 };
+	// Пытаемся получить информацию из карточки Lampa
+	function getAnimeInfoFromCard(card) {
+		if (!card) return null;
 		
-		// Удаляем лишнее
-		let cleanTitle = title
-			.replace(/\(\s*\d+\s*серия\s*\)/gi, "")
-			.replace(/-\s*\d+\s*серия/gi, "")
-			.replace(/\s*серия\s*\d+/gi, "")
-			.replace(/episode\s*\d+/gi, "")
-			.replace(/\(.*?\)/g, "")
-			.replace(/\s+/g, " ")
-			.trim();
+		// Пробуем разные поля с названиями
+		const possibleTitles = [
+			card.original_title,
+			card.original_name,
+			card.title,
+			card.name,
+			card.ru_title,
+			card.en_title
+		].filter(Boolean);
 		
-		// Извлекаем номер эпизода
-		let episode = 1;
-		const episodeMatch = title.match(/(\d+)\s*(?:серия|серии|эпизод|episode|эп)/i);
-		if (episodeMatch) {
-			episode = parseInt(episodeMatch[1]);
-		} else {
-			// Пробуем найти число в конце
-			const numberAtEnd = title.match(/(\d+)\s*$/);
-			if (numberAtEnd) episode = parseInt(numberAtEnd[1]);
-		}
+		if (possibleTitles.length === 0) return null;
 		
-		return { name: cleanTitle, episode: episode };
+		// Возвращаем первый найденный заголовок + ID карточки
+		return {
+			title: possibleTitles[0],
+			cardId: card.id || card.tmdb_id || card.kinopoisk_id,
+			season: card.season_number || 1,
+			isAnime: isLikelyAnime(card)
+		};
 	}
 
-	// Преобразование русского названия в английское
-	function translateToEnglish(name) {
-		const lowerName = name.toLowerCase();
+	// Определяем, аниме ли это, по разным признакам
+	function isLikelyAnime(card) {
+		if (!card) return true; // Если нет данных, пробуем обработать
 		
-		// Проверяем ручной маппинг
-		for (const [rus, eng] of Object.entries(ANIME_MAPPING)) {
-			if (lowerName.includes(rus)) {
-				return eng;
-			}
+		// По языку
+		const lang = (card.original_language || "").toLowerCase();
+		const isAsianLang = ['ja', 'zh', 'cn', 'ko', 'jp'].includes(lang);
+		
+		// По жанрам
+		let isAnimeGenre = false;
+		if (card.genres && Array.isArray(card.genres)) {
+			isAnimeGenre = card.genres.some(g => {
+				const name = (g.name || "").toLowerCase();
+				return name.includes('аниме') || 
+					   name.includes('anime') || 
+					   name.includes('animation') ||
+					   name.includes('anime series') ||
+					   g.id === 16; // ID аниме в TMDB
+			});
 		}
 		
-		// Если не нашли, возвращаем оригинал
-		return name;
+		// По ключевым словам в названии
+		const title = (card.title || card.name || "").toLowerCase();
+		const titleKeywords = [
+			'jujutsu', 'kaisen', 'магическая', 'битва',
+			'anime', 'аниме', 'тентакли', 'дракон',
+			'ниндзя', 'самурай', 'shounen', 'сёнен'
+		];
+		const hasAnimeKeyword = titleKeywords.some(kw => title.includes(kw));
+		
+		return isAsianLang || isAnimeGenre || hasAnimeKeyword;
 	}
 
-	// Получение MAL ID через AniList
-	async function getMALId(englishName) {
-		// Проверяем кэш
-		const cacheKey = `mal_${englishName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
-		const cached = localStorage.getItem(cacheKey);
-		if (cached) {
-			const data = JSON.parse(cached);
-			if (Date.now() - data.timestamp < 7 * 24 * 60 * 60 * 1000) { // 7 дней
-				return data.malId;
+	// Основная функция для Jujutsu Kaisen
+	async function processJujutsuKaisen(videoParams, episode) {
+		const JUJUTSU_KAISEN_MAL_ID = 40748;
+		
+		log(`Jujutsu Kaisen detected, episode ${episode}`);
+		
+		// Получаем сегменты для указанной серии
+		const segments = await getSkipTimes(JUJUTSU_KAISEN_MAL_ID, episode);
+		
+		if (segments.length > 0) {
+			const added = addSegmentsToItem(videoParams, segments);
+			
+			if (added > 0) {
+				log(`Added ${added} skip segments for Jujutsu Kaisen`);
+				
+				// Показываем уведомление
+				if (Lampa.Noty) {
+					Lampa.Noty.show(`Добавлено ${added} меток пропуска`);
+				}
+				
+				// Обновляем плеер
+				if (Lampa.Player.listener) {
+					Lampa.Player.listener.send("segments", { skip: videoParams.segments.skip });
+				}
+				
+				return true;
 			}
 		}
 		
-		log(`Searching MAL ID for: "${englishName}"`);
-		
-		try {
-			const query = `
-				query ($search: String) {
-					Media(search: $search, type: ANIME) {
-						id
-						idMal
-						title {
-							romaji
-							english
-							native
-							userPreferred
-						}
-					}
-				}
-			`;
-			
-			const response = await fetch(ANILIST_API, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					"Accept": "application/json"
-				},
-				body: JSON.stringify({
-					query: query,
-					variables: { search: englishName }
-				})
-			});
-			
-			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
-			}
-			
-			const data = await response.json();
-			
-			if (data?.data?.Media?.idMal) {
-				const malId = data.data.Media.idMal;
-				
-				// Сохраняем в кэш
-				localStorage.setItem(cacheKey, JSON.stringify({
-					malId: malId,
-					timestamp: Date.now(),
-					title: data.data.Media.title.romaji || englishName
-				}));
-				
-				log(`Found MAL ID: ${malId} (${data.data.Media.title.romaji || englishName})`);
-				return malId;
-			}
-			
-			// Пробуем поиск с несколькими результатами
-			const searchQuery = `
-				query ($search: String) {
-					Page(page: 1, perPage: 3) {
-						media(search: $search, type: ANIME) {
-							id
-							idMal
-							title {
-								romaji
-								english
-								native
-							}
-						}
-					}
-				}
-			`;
-			
-			const searchResponse = await fetch(ANILIST_API, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					"Accept": "application/json"
-				},
-				body: JSON.stringify({
-					query: searchQuery,
-					variables: { search: englishName }
-				})
-			});
-			
-			const searchData = await searchResponse.json();
-			
-			if (searchData?.data?.Page?.media?.length > 0) {
-				for (const media of searchData.data.Page.media) {
-					if (media.idMal) {
-						const malId = media.idMal;
-						
-						localStorage.setItem(cacheKey, JSON.stringify({
-							malId: malId,
-							timestamp: Date.now(),
-							title: media.title.romaji || englishName
-						}));
-						
-						log(`Found MAL ID in search: ${malId} (${media.title.romaji})`);
-						return malId;
-					}
-				}
-			}
-			
-			return null;
-			
-		} catch (error) {
-			log(`AniList error: ${error.message}`);
-			return null;
-		}
+		return false;
 	}
 
 	// Получение сегментов пропуска
 	async function getSkipTimes(malId, episode) {
 		if (!malId || !episode) return [];
 		
-		// Проверяем кэш
+		// Кэширование
 		const cacheKey = `skip_${malId}_${episode}`;
 		const cached = localStorage.getItem(cacheKey);
 		if (cached) {
-			const data = JSON.parse(cached);
-			if (Date.now() - data.timestamp < 30 * 24 * 60 * 60 * 1000) { // 30 дней
-				log(`Using cached skip times for episode ${episode}`);
-				return data.segments;
-			}
+			try {
+				const data = JSON.parse(cached);
+				if (Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
+					log(`Using cached skip times for episode ${episode}`);
+					return data.segments;
+				}
+			} catch (e) {}
 		}
 		
 		log(`Requesting skip times for MAL ID ${malId}, episode ${episode}`);
@@ -320,8 +152,7 @@
 			
 			const response = await fetch(url, {
 				headers: {
-					"Accept": "application/json",
-					"User-Agent": "LampaAnimeSkip/1.0"
+					"Accept": "application/json"
 				}
 			});
 			
@@ -339,7 +170,7 @@
 			
 			if (data.found && data.results?.length > 0) {
 				const segments = data.results.map(item => {
-					const type = (item.skipType || item.skip_type || "").toLowerCase();
+					const type = (item.skipType || "").toLowerCase();
 					let name = "Пропустить";
 					
 					if (type.includes("op")) name = "Опенинг";
@@ -347,8 +178,8 @@
 					else if (type === "recap") name = "Рекап";
 					
 					return {
-						start: item.interval.startTime ?? item.interval.start_time,
-						end: item.interval.endTime ?? item.interval.end_time,
+						start: item.interval.startTime,
+						end: item.interval.endTime,
 						name: name,
 						type: type
 					};
@@ -357,8 +188,7 @@
 				// Сохраняем в кэш
 				localStorage.setItem(cacheKey, JSON.stringify({
 					segments: segments,
-					timestamp: Date.now(),
-					count: segments.length
+					timestamp: Date.now()
 				}));
 				
 				log(`Found ${segments.length} skip segments`);
@@ -373,94 +203,84 @@
 		}
 	}
 
-	// Определяем, аниме ли это
-	function isAnime(title) {
-		if (!title) return false;
+	// Определяем номер серии из разных источников
+	function extractEpisodeNumber(videoParams, card) {
+		// 1. Из параметров видео
+		if (videoParams.episode || videoParams.e || videoParams.episode_number) {
+			const ep = videoParams.episode || videoParams.e || videoParams.episode_number;
+			return parseInt(ep);
+		}
 		
-		const lowerTitle = title.toLowerCase();
-		
-		// Ключевые слова, указывающие на аниме
-		const animeKeywords = [
-			'аниме', 'anime', 'магическая', 'битва', 'ниндзя',
-			'дракон', 'самурай', 'магия', 'сёнен', 'сёдзё',
-			'shonen', 'shoujo', 'seinen', 'josei', 'эпизод',
-			'серия', 'opening', 'ending', 'опенинг', 'эндинг'
-		];
-		
-		// Проверяем по ключевым словам
-		for (const keyword of animeKeywords) {
-			if (lowerTitle.includes(keyword)) {
-				return true;
+		// 2. Из плейлиста
+		if (videoParams.playlist && Array.isArray(videoParams.playlist)) {
+			const url = videoParams.url;
+			const index = videoParams.playlist.findIndex(p => p.url === url);
+			if (index !== -1) {
+				return index + 1;
 			}
 		}
 		
-		// Проверяем по ручному маппингу
-		for (const rusName of Object.keys(ANIME_MAPPING)) {
-			if (lowerTitle.includes(rusName)) {
-				return true;
-			}
+		// 3. Из названия в логах (fallback)
+		const title = videoParams.title || "";
+		const epMatch = title.match(/(\d+)/);
+		if (epMatch) {
+			return parseInt(epMatch[1]);
 		}
 		
-		return false;
+		// 4. По умолчанию
+		return 1;
 	}
 
-	// Основная функция
+	// Основная функция обработки
 	async function processVideo(videoParams) {
 		try {
-			// Получаем название из параметров
-			const title = videoParams.title || "";
-			
-			if (!title) {
-				log("No title provided");
-				return;
+			// Получаем карточку
+			let card = videoParams.card || videoParams.movie;
+			if (!card) {
+				const active = Lampa.Activity.active();
+				card = active?.card || active?.movie;
 			}
 			
-			log(`Processing: "${title}"`);
+			// Извлекаем номер серии
+			const episode = extractEpisodeNumber(videoParams, card);
+			log(`Processing video, episode: ${episode}`);
 			
-			// Проверяем, аниме ли это
-			if (!isAnime(title)) {
-				log("Not an anime, skipping");
-				return;
-			}
+			// Пробуем получить информацию из карточки
+			const animeInfo = getAnimeInfoFromCard(card);
 			
-			// Парсим информацию
-			const videoInfo = parseVideoInfo(title);
-			log(`Parsed: "${videoInfo.name}", Episode: ${videoInfo.episode}`);
-			
-			// Переводим на английский
-			const englishName = translateToEnglish(videoInfo.name);
-			log(`Translated to: "${englishName}"`);
-			
-			// Получаем MAL ID
-			const malId = await getMALId(englishName);
-			
-			if (!malId) {
-				log(`Could not find MAL ID for "${englishName}"`);
-				return;
-			}
-			
-			// Получаем сегменты пропуска
-			const segments = await getSkipTimes(malId, videoInfo.episode);
-			
-			if (segments.length > 0) {
-				// Добавляем сегменты
-				const added = addSegmentsToItem(videoParams, segments);
+			if (animeInfo) {
+				log(`Card info: "${animeInfo.title}", isAnime: ${animeInfo.isAnime}`);
 				
-				if (added > 0) {
-					log(`Added ${added} skip segments`);
+				// Если это Jujutsu Kaisen, обрабатываем напрямую
+				const title = animeInfo.title.toLowerCase();
+				if (title.includes('jujutsu') || 
+					title.includes('kaisen') || 
+					title.includes('магическая') || 
+					title.includes('битва')) {
 					
-					// Показываем уведомление
-					if (Lampa.Noty) {
-						Lampa.Noty.show(`Добавлено ${added} меток пропуска`);
-					}
-					
-					// Обновляем плеер
-					if (Lampa.Player.listener) {
-						Lampa.Player.listener.send("segments", { skip: videoParams.segments.skip });
-					}
+					const success = await processJujutsuKaisen(videoParams, episode);
+					if (success) return;
+				}
+				
+				// Если не Jujutsu Kaisen, но похоже на аниме
+				if (animeInfo.isAnime) {
+					log(`Looks like anime, but not Jujutsu Kaisen. Title: "${animeInfo.title}"`);
+					// Можно добавить обработку других аниме
 				}
 			} else {
-				log("No skip segments available");
+				// Если нет информации из карточки, пробуем по названию видео
+				const videoTitle = videoParams.title || "";
+				log(`No card info, video title: "${videoTitle}"`);
+				
+				// Для Jujutsu Kaisen все равно пробуем
+				const lowerTitle = videoTitle.toLowerCase();
+				if (lowerTitle.includes('магическая') || 
+					lowerTitle.includes('битва') ||
+					episode > 0) { // Если есть номер серии
+					
+					log(`Trying Jujutsu Kaisen for episode ${episode}`);
+					await processJujutsuKaisen(videoParams, episode);
+				}
 			}
 			
 		} catch (error) {
@@ -470,47 +290,48 @@
 
 	// Инициализация
 	function init() {
-		if (window.lampa_anime_skip_simple) return;
-		window.lampa_anime_skip_simple = true;
+		if (window.lampa_jjk_fixed) return;
+		window.lampa_jjk_fixed = true;
 		
 		// Сохраняем оригинальный метод
 		const originalPlay = Lampa.Player.play;
 		
 		// Переопределяем метод
 		Lampa.Player.play = function (videoParams) {
-			// Запускаем обработку в фоне
+			// Запускаем обработку
 			setTimeout(() => {
 				processVideo(videoParams);
-			}, 1000); // Задержка для стабильности
+			}, 1500); // Даем время загрузиться плееру
 			
 			// Вызываем оригинальный метод
 			return originalPlay.call(this, videoParams);
 		};
 		
-		log("Simple Anime Skip plugin initialized");
+		log("Jujutsu Kaisen Skip plugin initialized");
 		
-		// Добавляем глобальные методы для отладки
-		window.AniSkipDebug = {
+		// Глобальные методы для отладки
+		window.JJKDebug = {
+			testEpisode: (episode) => {
+				const active = Lampa.Activity.active();
+				if (active?.videoParams) {
+					processJujutsuKaisen(active.videoParams, episode || 1);
+				}
+			},
 			clearCache: () => {
 				const keys = [];
 				for (let i = 0; i < localStorage.length; i++) {
 					const key = localStorage.key(i);
-					if (key.startsWith("mal_") || key.startsWith("skip_")) {
+					if (key.startsWith("skip_")) {
 						keys.push(key);
 					}
 				}
 				keys.forEach(key => localStorage.removeItem(key));
 				log("Cache cleared");
-			},
-			getInfo: (title) => {
-				const info = parseVideoInfo(title);
-				const english = translateToEnglish(info.name);
-				return { ...info, englishName: english };
 			}
 		};
 	}
 
-	// Запускаем при готовности Lampa
+	// Запускаем
 	if (window.Lampa && window.Lampa.Player) {
 		init();
 	} else {

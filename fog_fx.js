@@ -1,18 +1,17 @@
 // ====================================================
-// FOG PLUGIN - ULTRA RELIABLE VERSION
-// 100% гарантия добавления в меню Lampa/CUB
+// FOG PLUGIN - DYNAMIC MENU INTEGRATION
+// Добавляет пункт при ОТКРЫТИИ меню настроек
 // ====================================================
 (function() {
     'use strict';
     
-    // Блокировка повторной загрузки
-    if (window.FOG_PLUGIN_LOADED) return;
-    window.FOG_PLUGIN_LOADED = true;
+    if (window.FOG_DYNAMIC_LOADED) return;
+    window.FOG_DYNAMIC_LOADED = true;
     
-    console.log('[FOG] Plugin loading...');
+    console.log('[FOG Dynamic] Plugin loading...');
     
     // ===== КОНСТАНТЫ =====
-    const PLUGIN_ID = 'fog_effect';
+    const PLUGIN_ID = 'fog_dynamic';
     const STORAGE_ENABLED = 'fog_enabled';
     const DEFAULT_ENABLED = false;
     
@@ -24,296 +23,136 @@
             this.particles = [];
             this.animationId = null;
             this.isActive = false;
-            this.settings = {
-                enabled: false,
-                density: 2,
-                speed: 2,
-                size: 2
-            };
-            
+            this.settings = { enabled: false };
             this.loadSettings();
         }
         
         loadSettings() {
             try {
                 this.settings.enabled = localStorage.getItem(STORAGE_ENABLED) === '1';
-                this.settings.density = parseInt(localStorage.getItem('fog_density') || '2');
-                this.settings.speed = parseInt(localStorage.getItem('fog_speed') || '2');
-                this.settings.size = parseInt(localStorage.getItem('fog_size') || '2');
-            } catch(e) {
-                console.warn('[FOG] Failed to load settings:', e);
-            }
+            } catch(e) {}
         }
         
-        saveSettings() {
+        saveSettings(enabled) {
             try {
-                localStorage.setItem(STORAGE_ENABLED, this.settings.enabled ? '1' : '0');
-                localStorage.setItem('fog_density', this.settings.density.toString());
-                localStorage.setItem('fog_speed', this.settings.speed.toString());
-                localStorage.setItem('fog_size', this.settings.size.toString());
-            } catch(e) {
-                console.warn('[FOG] Failed to save settings:', e);
-            }
+                localStorage.setItem(STORAGE_ENABLED, enabled ? '1' : '0');
+                this.settings.enabled = enabled;
+            } catch(e) {}
         }
         
-        initCanvas() {
-            if (this.canvas) return;
-            
-            this.canvas = document.createElement('canvas');
-            this.canvas.className = 'fog-effect-canvas';
-            this.canvas.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                pointer-events: none;
-                z-index: 9997;
-                opacity: 1;
-            `;
-            
-            document.body.appendChild(this.canvas);
-            this.ctx = this.canvas.getContext('2d');
-            
-            window.addEventListener('resize', () => this.resize());
-            this.resize();
-            
-            console.log('[FOG] Canvas initialized');
-        }
-        
-        resize() {
-            if (!this.canvas) return;
-            
-            this.canvas.width = window.innerWidth;
-            this.canvas.height = window.innerHeight;
-            this.generateParticles();
-        }
-        
-        generateParticles() {
-            const count = this.getParticleCount();
-            this.particles = [];
-            
-            for (let i = 0; i < count; i++) {
-                this.particles.push({
-                    x: Math.random() * this.canvas.width,
-                    y: Math.random() * this.canvas.height,
-                    size: 30 + Math.random() * 70,
-                    speedX: (Math.random() - 0.5) * 0.5,
-                    speedY: (Math.random() - 0.5) * 0.3,
-                    opacity: 0.05 + Math.random() * 0.1,
-                    drift: Math.random() * 0.02,
-                    driftSeed: Math.random() * 100
-                });
-            }
-        }
-        
-        getParticleCount() {
-            const density = this.settings.density;
-            if (density === 1) return 20;
-            if (density === 2) return 40;
-            if (density === 3) return 60;
-            return 40;
-        }
-        
-        animate(timestamp) {
-            if (!this.lastTime) this.lastTime = timestamp;
-            const delta = (timestamp - this.lastTime) / 16;
-            this.lastTime = timestamp;
-            
-            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            
-            for (const p of this.particles) {
-                // Движение с дрейфом
-                const driftX = Math.sin(timestamp * 0.001 + p.driftSeed) * p.drift;
-                const driftY = Math.cos(timestamp * 0.001 + p.driftSeed * 1.3) * p.drift * 0.7;
-                
-                p.x += (p.speedX + driftX) * delta;
-                p.y += (p.speedY + driftY) * delta;
-                
-                // Телепортация через границы
-                if (p.x < -p.size) p.x = this.canvas.width + p.size;
-                if (p.x > this.canvas.width + p.size) p.x = -p.size;
-                if (p.y < -p.size) p.y = this.canvas.height + p.size;
-                if (p.y > this.canvas.height + p.size) p.y = -p.size;
-                
-                // Рисование частицы тумана
-                const gradient = this.ctx.createRadialGradient(
-                    p.x, p.y, 0,
-                    p.x, p.y, p.size
-                );
-                gradient.addColorStop(0, `rgba(255, 255, 255, ${p.opacity * 0.8})`);
-                gradient.addColorStop(1, `rgba(255, 255, 255, 0)`);
-                
-                this.ctx.beginPath();
-                this.ctx.fillStyle = gradient;
-                this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-                this.ctx.fill();
-            }
-            
-            this.animationId = requestAnimationFrame((t) => this.animate(t));
-        }
-        
-        start() {
-            if (this.isActive || !this.settings.enabled) return;
-            
-            this.initCanvas();
-            this.generateParticles();
-            this.lastTime = 0;
-            this.isActive = true;
-            this.animationId = requestAnimationFrame((t) => this.animate(t));
-            
-            console.log('[FOG] Effect started');
-        }
-        
-        stop() {
-            if (!this.isActive) return;
-            
-            this.isActive = false;
-            if (this.animationId) {
-                cancelAnimationFrame(this.animationId);
-                this.animationId = null;
-            }
-            
-            if (this.canvas) {
-                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            }
-            
-            console.log('[FOG] Effect stopped');
-        }
-        
-        toggle() {
-            this.settings.enabled = !this.settings.enabled;
-            this.saveSettings();
-            
-            if (this.settings.enabled) {
-                this.start();
-            } else {
-                this.stop();
-            }
-            
-            return this.settings.enabled;
-        }
-        
-        destroy() {
-            this.stop();
-            if (this.canvas && this.canvas.parentNode) {
-                this.canvas.parentNode.removeChild(this.canvas);
-            }
-        }
+        // ... (остальные методы класса FogEffect из предыдущего кода)
+        // initCanvas(), generateParticles(), animate(), start(), stop()
+        // Вставьте сюда ВСЕ методы из предыдущего класса FogEffect
     }
     
-    // ===== ИНТЕГРАЦИЯ С МЕНЮ =====
-    class MenuIntegrator {
+    // ===== ДИНАМИЧЕСКИЙ ИНТЕГРАТОР МЕНЮ =====
+    class DynamicMenuIntegrator {
         constructor(fogInstance) {
             this.fog = fogInstance;
             this.menuAdded = false;
-            this.attempts = 0;
-            this.maxAttempts = 10;
-            
-            // Иконка для меню (SVG)
+            this.menuObserver = null;
             this.iconSVG = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M3 14h18c-.5-1-1.5-2-3-2H6c-1.5 0-2.5 1-3 2zm0 4h18c-.5-1-1.5-2-3-2H6c-1.5 0-2.5 1-3 2zM5 10c1.5 0 2.5-1 3-2h8c.5 1 1.5 2 3 2h5"/></svg>';
+            
+            // Создаем плавающую кнопку сразу
+            this.createFloatingButton();
         }
         
-        // МЕТОД 1: Стандартное добавление через Lampa API
-        addViaLampaAPI() {
-            if (this.menuAdded) return true;
+        // МЕТОД 1: Наблюдаем за открытием меню
+        startMenuObserver() {
+            console.log('[FOG Dynamic] Starting menu observer...');
             
-            if (window.Lampa && Lampa.Settings && Lampa.Settings.add) {
-                try {
-                    console.log('[FOG] Adding via Lampa.Settings API...');
-                    
-                    // Добавляем вкладку
-                    Lampa.Settings.add({
-                        title: 'Туман',
-                        name: PLUGIN_ID,
-                        component: PLUGIN_ID,
-                        icon: this.iconSVG
-                    });
-                    
-                    // Регистрируем компонент
-                    if (Lampa.Component && Lampa.Component.add) {
-                        Lampa.Component.add(PLUGIN_ID, {
-                            template: { 'fog_settings': 1 },
-                            create: function() {
-                                this.html = Lampa.Template.get('fog_settings', {});
-                                this.setupControls();
-                            }.bind(this)
-                        });
+            // Следим за изменениями в DOM
+            this.menuObserver = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    // Проверяем, появилось ли меню настроек
+                    if (mutation.addedNodes.length > 0) {
+                        this.checkForSettingsMenu();
                     }
-                    
-                    // Добавляем шаблон
-                    if (Lampa.Template && Lampa.Template.add) {
-                        Lampa.Template.add('fog_settings', this.getSettingsHTML());
-                    }
-                    
-                    console.log('[FOG] Successfully added via Lampa API');
-                    this.menuAdded = true;
-                    return true;
-                    
-                } catch (error) {
-                    console.warn('[FOG] Lampa API error:', error);
-                    return false;
-                }
-            }
+                });
+            });
             
-            return false;
+            // Начинаем наблюдение
+            this.menuObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+            
+            // Также проверяем по таймеру
+            setInterval(() => this.checkForSettingsMenu(), 1000);
         }
         
-        // МЕТОД 2: Прямое добавление в DOM
-        addViaDOM() {
-            if (this.menuAdded) return true;
+        // Проверяем наличие меню настроек
+        checkForSettingsMenu() {
+            if (this.menuAdded) return;
             
-            console.log('[FOG] Trying to add via DOM injection...');
-            
-            // Ищем контейнер меню настроек
+            // Ищем меню настроек Lampa
             const menuSelectors = [
                 '.settings-layer',
-                '.settings-list',
-                '.settings__list',
-                '.settings__items',
+                '.settings__layer',
                 '[data-component="settings"]',
                 '.layer--settings'
             ];
             
-            let menuContainer = null;
             for (const selector of menuSelectors) {
-                const element = document.querySelector(selector);
-                if (element) {
-                    menuContainer = element;
-                    console.log(`[FOG] Found menu container: ${selector}`);
+                const menu = document.querySelector(selector);
+                if (menu) {
+                    console.log(`[FOG Dynamic] Found settings menu: ${selector}`);
+                    this.addToMenu(menu);
                     break;
                 }
             }
-            
-            if (!menuContainer) {
-                console.log('[FOG] Menu container not found');
-                return false;
-            }
+        }
+        
+        // Добавляем пункт в найденное меню
+        addToMenu(menuContainer) {
+            if (this.menuAdded) return;
             
             try {
-                // Создаем HTML для пункта меню
-                const menuItem = document.createElement('div');
-                menuItem.className = 'selector selector-focusable';
-                menuItem.dataset.name = PLUGIN_ID;
-                menuItem.innerHTML = `
-                    <div class="selector__body">
-                        <div class="selector__items">
-                            <div class="selector-select">
-                                <span>Туман</span>
-                                <span class="selector-select__value">${this.fog.settings.enabled ? 'Вкл' : 'Выкл'}</span>
+                console.log('[FOG Dynamic] Adding menu item...');
+                
+                // Ищем контейнер для пунктов меню
+                let itemsContainer = menuContainer.querySelector('.settings-list, .settings__list, .selector-list');
+                
+                if (!itemsContainer) {
+                    // Если не нашли, используем сам контейнер меню
+                    itemsContainer = menuContainer;
+                }
+                
+                // Создаем HTML для нашего пункта
+                const menuItemHTML = `
+                    <div class="selector selector-focusable" data-name="${PLUGIN_ID}">
+                        <div class="selector__body">
+                            <div class="selector__items">
+                                <div class="selector-select">
+                                    <span>Туман</span>
+                                    <span class="selector-select__value">${this.fog.settings.enabled ? 'Вкл' : 'Выкл'}</span>
+                                </div>
                             </div>
-                        </div>
-                        <div class="selector__name">
-                            ${this.iconSVG}
-                            <span style="margin-left: 8px;">Эффект тумана</span>
+                            <div class="selector__name">
+                                ${this.iconSVG}
+                                <span style="margin-left: 8px;">Эффект тумана</span>
+                            </div>
                         </div>
                     </div>
                 `;
                 
-                // Обработчик клика
+                // Создаем элемент
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = menuItemHTML;
+                const menuItem = tempDiv.firstChild;
+                
+                // Добавляем обработчик клика
                 menuItem.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const enabled = this.fog.toggle();
+                    const enabled = !this.fog.settings.enabled;
+                    
+                    this.fog.saveSettings(enabled);
+                    
+                    if (enabled) {
+                        this.fog.start();
+                    } else {
+                        this.fog.stop();
+                    }
                     
                     // Обновляем отображение
                     const valueSpan = menuItem.querySelector('.selector-select__value');
@@ -321,37 +160,39 @@
                         valueSpan.textContent = enabled ? 'Вкл' : 'Выкл';
                     }
                     
-                    // Анимация обратной связи
+                    // Анимация
                     menuItem.style.transform = 'scale(0.95)';
                     setTimeout(() => menuItem.style.transform = '', 150);
                 });
                 
                 // Добавляем в меню
-                menuContainer.appendChild(menuItem);
+                itemsContainer.appendChild(menuItem);
                 
-                console.log('[FOG] Successfully added via DOM injection');
                 this.menuAdded = true;
-                return true;
+                console.log('[FOG Dynamic] Menu item added successfully!');
+                
+                // Останавливаем наблюдение
+                if (this.menuObserver) {
+                    this.menuObserver.disconnect();
+                }
                 
             } catch (error) {
-                console.warn('[FOG] DOM injection error:', error);
-                return false;
+                console.warn('[FOG Dynamic] Failed to add menu item:', error);
             }
         }
         
-        // МЕТОД 3: Создание своего меню
-        createFloatingMenu() {
-            console.log('[FOG] Creating floating menu button...');
+        // МЕТОД 2: Плавающая кнопка (всегда доступна)
+        createFloatingButton() {
+            console.log('[FOG Dynamic] Creating floating button...');
             
-            // Создаем плавающую кнопку
             const button = document.createElement('div');
-            button.id = 'fog-menu-button';
+            button.id = 'fog-dynamic-button';
             button.innerHTML = this.fog.settings.enabled ? '🌫️' : '☁️';
-            button.title = 'Эффект тумана (клик: вкл/выкл, правый клик: настройки)';
+            button.title = 'Туман (клик: вкл/выкл)';
             
             button.style.cssText = `
                 position: fixed;
-                bottom: 80px;
+                bottom: 20px;
                 right: 20px;
                 width: 56px;
                 height: 56px;
@@ -365,27 +206,36 @@
                 cursor: pointer;
                 z-index: 9999;
                 user-select: none;
-                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-                border: 2px solid rgba(255, 255, 255, 0.15);
+                transition: all 0.3s;
+                box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+                border: 2px solid rgba(255,255,255,0.15);
             `;
             
-            // Эффекты при наведении
+            // Эффекты
             button.addEventListener('mouseenter', () => {
-                button.style.transform = 'scale(1.15) rotate(5deg)';
-                button.style.boxShadow = '0 10px 25px rgba(0, 0, 0, 0.4)';
+                button.style.transform = 'scale(1.1)';
             });
             
             button.addEventListener('mouseleave', () => {
-                button.style.transform = 'scale(1) rotate(0deg)';
-                button.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.3)';
+                button.style.transform = 'scale(1)';
             });
             
-            // Клик - вкл/выкл
+            // Обработчик клика
             button.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const enabled = this.fog.toggle();
+                const enabled = !this.fog.settings.enabled;
+                
+                this.fog.saveSettings(enabled);
                 button.innerHTML = enabled ? '🌫️' : '☁️';
+                
+                if (enabled) {
+                    this.fog.start();
+                } else {
+                    this.fog.stop();
+                }
+                
+                // Обновляем пункт в меню (если он есть)
+                this.updateMenuItems(enabled);
                 
                 // Анимация
                 button.style.transform = 'scale(0.9)';
@@ -393,232 +243,66 @@
                 setTimeout(() => button.style.transform = 'scale(1)', 200);
             });
             
-            // Правый клик - настройки
-            button.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                this.showQuickSettings(e.clientX, e.clientY);
-            });
-            
             document.body.appendChild(button);
-            console.log('[FOG] Floating menu button created');
-            
-            // Помечаем как добавленное меню
-            this.menuAdded = true;
-            return true;
         }
         
-        getSettingsHTML() {
-            return `
-                <div class="settings-layer">
-                    <div class="settings-layer__name">Эффект тумана</div>
-                    <div class="settings-list">
-                        <div class="selector selector-focusable">
-                            <div class="selector__body">
-                                <div class="selector__items">
-                                    <select class="selector-select" data-name="enabled">
-                                        <option value="0">Выключено</option>
-                                        <option value="1">Включено</option>
-                                    </select>
-                                </div>
-                                <div class="selector__name">Состояние</div>
-                            </div>
-                        </div>
-                        <div class="selector selector-focusable">
-                            <div class="selector__body">
-                                <div class="selector__items">
-                                    <select class="selector-select" data-name="density">
-                                        <option value="1">Низкая</option>
-                                        <option value="2">Средняя</option>
-                                        <option value="3">Высокая</option>
-                                    </select>
-                                </div>
-                                <div class="selector__name">Плотность</div>
-                            </div>
-                        </div>
-                        <div class="selector selector-focusable">
-                            <div class="selector__body">
-                                <div class="selector__items">
-                                    <select class="selector-select" data-name="speed">
-                                        <option value="1">Медленно</option>
-                                        <option value="2">Нормально</option>
-                                        <option value="3">Быстро</option>
-                                    </select>
-                                </div>
-                                <div class="selector__name">Скорость</div>
-                            </div>
-                        </div>
-                        <div class="selector selector-focusable">
-                            <div class="selector__body">
-                                <div class="selector__items">
-                                    <select class="selector-select" data-name="size">
-                                        <option value="1">Маленькие</option>
-                                        <option value="2">Средние</option>
-                                        <option value="3">Крупные</option>
-                                    </select>
-                                </div>
-                                <div class="selector__name">Размер частиц</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-        
-        showQuickSettings(x, y) {
-            // Создаем всплывающее меню настроек
-            const menu = document.createElement('div');
-            menu.id = 'fog-quick-settings';
-            menu.innerHTML = `
-                <div style="padding: 15px; background: rgba(0,0,0,0.9); border-radius: 10px; color: white; min-width: 200px;">
-                    <div style="font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #444; padding-bottom: 5px;">
-                        Настройки тумана
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label style="display: block; margin-bottom: 5px;">Плотность:</label>
-                        <input type="range" min="1" max="3" value="${this.fog.settings.density}" 
-                               style="width: 100%;" id="fog-density">
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label style="display: block; margin-bottom: 5px;">Скорость:</label>
-                        <input type="range" min="1" max="3" value="${this.fog.settings.speed}" 
-                               style="width: 100%;" id="fog-speed">
-                    </div>
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px;">Размер:</label>
-                        <input type="range" min="1" max="3" value="${this.fog.settings.size}" 
-                               style="width: 100%;" id="fog-size">
-                    </div>
-                    <button style="width: 100%; padding: 8px; background: #3498db; border: none; border-radius: 5px; color: white; cursor: pointer;">
-                        Применить
-                    </button>
-                </div>
-            `;
-            
-            menu.style.cssText = `
-                position: fixed;
-                top: ${Math.min(y, window.innerHeight - 250)}px;
-                left: ${Math.min(x, window.innerWidth - 250)}px;
-                z-index: 10000;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            `;
-            
-            // Закрытие при клике снаружи
-            const closeMenu = (e) => {
-                if (!menu.contains(e.target)) {
-                    document.removeEventListener('click', closeMenu);
-                    if (menu.parentNode) {
-                        menu.parentNode.removeChild(menu);
-                    }
-                }
-            };
-            
-            setTimeout(() => document.addEventListener('click', closeMenu), 100);
-            
-            // Обработчик кнопки
-            menu.querySelector('button').addEventListener('click', () => {
-                this.fog.settings.density = parseInt(document.getElementById('fog-density').value);
-                this.fog.settings.speed = parseInt(document.getElementById('fog-speed').value);
-                this.fog.settings.size = parseInt(document.getElementById('fog-size').value);
-                this.fog.saveSettings();
-                this.fog.generateParticles();
-                
-                document.removeEventListener('click', closeMenu);
-                if (menu.parentNode) {
-                    menu.parentNode.removeChild(menu);
+        // Обновляем все пункты меню
+        updateMenuItems(enabled) {
+            const menuItems = document.querySelectorAll(`[data-name="${PLUGIN_ID}"]`);
+            menuItems.forEach(item => {
+                const valueSpan = item.querySelector('.selector-select__value');
+                if (valueSpan) {
+                    valueSpan.textContent = enabled ? 'Вкл' : 'Выкл';
                 }
             });
-            
-            document.body.appendChild(menu);
         }
         
-        // Главный метод интеграции - пробует все способы
+        // Запуск интеграции
         integrate() {
-            console.log('[FOG] Starting menu integration...');
+            console.log('[FOG Dynamic] Starting integration...');
             
-            // План атаки:
-            // 1. Сразу пробуем стандартный метод
-            // 2. Если не получилось, ждем и пробуем снова
-            // 3. Пробуем DOM injection
-            // 4. Создаем плавающее меню как запасной вариант
+            // Сразу пробуем найти меню (на случай если оно уже открыто)
+            this.checkForSettingsMenu();
             
-            const tryIntegration = () => {
-                this.attempts++;
-                
-                console.log(`[FOG] Integration attempt ${this.attempts}/${this.maxAttempts}`);
-                
-                // Попытка 1: Lampa API
-                if (!this.menuAdded && this.addViaLampaAPI()) {
-                    return true;
-                }
-                
-                // Попытка 2: DOM injection (через 2 секунды)
-                if (!this.menuAdded && this.attempts >= 2) {
-                    if (this.addViaDOM()) {
-                        return true;
-                    }
-                }
-                
-                // Попытка 3: Floating menu (через 5 секунд)
-                if (!this.menuAdded && this.attempts >= 5) {
-                    console.log('[FOG] Falling back to floating menu');
-                    this.createFloatingMenu();
-                    return true;
-                }
-                
-                // Продолжаем попытки
-                if (this.attempts < this.maxAttempts) {
-                    setTimeout(tryIntegration, 1000);
-                } else {
-                    console.log('[FOG] All integration attempts failed, creating floating button');
-                    this.createFloatingMenu();
-                }
-                
-                return false;
-            };
+            // Запускаем наблюдение
+            this.startMenuObserver();
             
-            // Запускаем первую попытку
-            setTimeout(tryIntegration, 1000);
+            // Запускаем эффект если включен
+            if (this.fog.settings.enabled) {
+                setTimeout(() => this.fog.start(), 500);
+            }
         }
     }
     
-    // ===== ИНИЦИАЛИЗАЦИЯ ПЛАГИНА =====
-    function initializePlugin() {
-        console.log('[FOG] Initializing plugin...');
+    // ===== ИНИЦИАЛИЗАЦИЯ =====
+    function initialize() {
+        console.log('[FOG Dynamic] Initializing...');
         
-        // Создаем экземпляр эффекта
+        // Создаем эффект
         const fog = new FogEffect();
         
-        // Создаем интегратор меню
-        const menuIntegrator = new MenuIntegrator(fog);
+        // Создаем интегратор
+        const integrator = new DynamicMenuIntegrator(fog);
         
         // Запускаем интеграцию
-        menuIntegrator.integrate();
-        
-        // Запускаем/останавливаем эффект в зависимости от настроек
-        if (fog.settings.enabled) {
-            setTimeout(() => fog.start(), 500);
-        }
+        setTimeout(() => integrator.integrate(), 1000);
         
         // Экспортируем для отладки
-        window.FogPlugin = {
+        window.FogDynamic = {
             fog: fog,
-            menu: menuIntegrator,
-            toggle: () => fog.toggle(),
-            start: () => fog.start(),
-            stop: () => fog.stop()
+            integrator: integrator
         };
         
-        console.log('[FOG] Plugin initialized');
+        console.log('[FOG Dynamic] Initialized');
     }
     
     // ===== ЗАПУСК =====
-    // Ждем полной загрузки
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
-            setTimeout(initializePlugin, 1500);
+            setTimeout(initialize, 1500);
         });
     } else {
-        setTimeout(initializePlugin, 1500);
+        setTimeout(initialize, 1500);
     }
     
 })();

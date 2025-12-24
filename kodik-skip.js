@@ -3,159 +3,176 @@
 
 	const ANISKIP_API = "https://api.aniskip.com/v2/skip-times";
 	const SKIP_TYPES = ["op", "ed", "recap"];
+	const JUJUTSU_KAISEN_MAL_ID = 40748;
 
 	function log(message) {
-		console.log("[AniSkip-JJK-FIXED]: " + message);
+		console.log("[AniSkip-JJK-FINAL]: " + message);
 	}
 
-	// Ключевая функция: добавляет сегменты в Lampa
+	// Ключевая функция: правильная инъекция сегментов
 	function injectSkipSegments(videoParams, segments) {
-		if (!segments || segments.length === 0) return false;
+		if (!segments || segments.length === 0) {
+			log("No segments to inject");
+			return false;
+		}
 		
-		log(`Injecting ${segments.length} segments to player`);
+		log(`Injecting ${segments.length} segments`);
 		
 		try {
-			// Метод 1: Прямая инъекция в videoParams (работает в большинстве случаев)
+			// ========== МЕТОД 1: Через videoParams (основной) ==========
 			if (videoParams) {
-				// Создаем объект segments если его нет
+				// Очищаем старые сегменты
 				videoParams.segments = videoParams.segments || {};
 				videoParams.segments.skip = segments;
 				
-				log("Segments added to videoParams");
-			}
-			
-			// Метод 2: Используем Lampa Player API для отправки сегментов
-			// Это основной метод, который должен работать
-			if (window.Lampa && Lampa.Player) {
-				// Вариант A: Через listener (если доступен)
-				if (Lampa.Player.listener) {
-					Lampa.Player.listener.send("segments", { 
-						skip: segments,
-						type: "skip"
-					});
-					log("Segments sent via Player.listener");
-				}
+				log("✓ Segments added to videoParams");
 				
-				// Вариант B: Прямое обновление активного плеера
-				const player = Lampa.Player.active();
-				if (player && player.segments) {
-					player.segments.skip = segments;
-					log("Segments updated in active player");
-				}
-				
-				// Вариант C: Глобальное событие
-				window.dispatchEvent(new CustomEvent('player-segments-update', {
-					detail: { segments: segments }
-				}));
-				
-				// Вариант D: Обновление через Activity
+				// Дополнительно: обновляем в Activity
 				const activity = Lampa.Activity.active();
 				if (activity && activity.videoParams) {
 					activity.videoParams.segments = activity.videoParams.segments || {};
 					activity.videoParams.segments.skip = segments;
-					log("Segments updated in activity");
+					log("✓ Segments updated in Activity");
 				}
 			}
 			
-			// Метод 3: Используем существующий API для меток времени
-			// Проверяем, есть ли плагин меток времени
-			if (window.Lampa && Lampa.Timeline) {
+			// ========== МЕТОД 2: Через Player.listener ==========
+			if (Lampa.Player && Lampa.Player.listener) {
 				try {
-					// Добавляем сегменты как временные метки
-					segments.forEach(segment => {
-						Lampa.Timeline.add({
-							time: segment.start,
-							duration: segment.end - segment.start,
-							title: segment.name,
-							type: "skip"
-						});
+					// Отправляем сегменты через listener
+					Lampa.Player.listener.send("segments", { 
+						skip: segments,
+						type: "skip"
 					});
-					log("Segments added via Timeline API");
+					log("✓ Segments sent via Player.listener");
 				} catch (e) {
-					log("Timeline API error: " + e.message);
+					log(`Player.listener error: ${e.message}`);
 				}
 			}
 			
-			// Метод 4: Используем DOM события (работает с большинством плееров)
+			// ========== МЕТОД 3: Прямой доступ к видеоплееру ==========
 			try {
-				// Создаем событие для видеоплеера
+				// Ищем видеоплеер в DOM
 				const videoElement = document.querySelector('video');
 				if (videoElement) {
-					const event = new CustomEvent('segmentsloaded', {
-						detail: {
-							segments: segments,
-							type: 'skip'
-						}
+					// Добавляем сегменты как свойство
+					videoElement._skipSegments = segments;
+					
+					// Создаем событие для обновления интерфейса
+					const event = new CustomEvent('skipSegmentsUpdated', {
+						detail: { segments: segments }
 					});
 					videoElement.dispatchEvent(event);
-					log("DOM event dispatched to video element");
+					
+					log("✓ Segments attached to video element");
 				}
 			} catch (e) {
-				log("DOM event error: " + e.message);
+				log(`Video element error: ${e.message}`);
 			}
 			
-			// Показываем уведомление пользователю
+			// ========== МЕТОД 4: Через глобальное событие ==========
+			try {
+				window.dispatchEvent(new CustomEvent('aniskip-segments-loaded', {
+					detail: {
+						segments: segments,
+						source: 'jjk-plugin',
+						timestamp: Date.now()
+					}
+				}));
+				log("✓ Global event dispatched");
+			} catch (e) {
+				log(`Global event error: ${e.message}`);
+			}
+			
+			// ========== МЕТОД 5: Через Timeline API (если есть) ==========
+			if (window.Lampa && Lampa.Timeline) {
+				try {
+					// Очищаем старые метки
+					Lampa.Timeline.clear();
+					
+					// Добавляем новые
+					segments.forEach(seg => {
+						Lampa.Timeline.add({
+							time: seg.start,
+							duration: seg.end - seg.start,
+							title: seg.name,
+							type: "skip",
+							color: seg.type === "op" ? "#FF6B6B" : "#4ECDC4"
+						});
+					});
+					log("✓ Segments added via Timeline API");
+				} catch (e) {
+					log(`Timeline API error: ${e.message}`);
+				}
+			}
+			
+			// ========== МЕТОД 6: Обновление интерфейса вручную ==========
+			try {
+				// Ищем элементы интерфейса Lampa
+				setTimeout(() => {
+					// Попробуем найти кнопки сегментов
+					const timeline = document.querySelector('.player__timeline, .timeline');
+					if (timeline) {
+						// Помечаем, что сегменты загружены
+						timeline.dataset.skipSegments = 'loaded';
+						log("✓ Timeline marked with skip segments");
+					}
+				}, 1000);
+			} catch (e) {
+				log(`UI update error: ${e.message}`);
+			}
+			
+			// ========== Уведомление пользователя ==========
 			if (Lampa.Noty) {
-				Lampa.Noty.show(`Добавлено ${segments.length} меток пропуска`);
+				try {
+					Lampa.Noty.show(`🎬 Добавлено ${segments.length} меток пропуска`);
+					log("✓ Notification shown");
+				} catch (e) {
+					log(`Noty error: ${e.message}`);
+				}
 			}
 			
+			// Сохраняем для отладки
+			window._lastInjectedSegments = {
+				segments: segments,
+				timestamp: Date.now(),
+				videoParams: videoParams
+			};
+			
+			log("✅ All injection methods attempted");
 			return true;
 			
 		} catch (error) {
-			log("Error injecting segments: " + error.message);
+			log(`❌ Critical injection error: ${error.message}`);
 			return false;
 		}
 	}
 
-	// Проверяем все варианты названий Jujutsu Kaisen
-	function isJujutsuKaisenTitle(title) {
-		if (!title) return false;
-		
-		const lowerTitle = title.toLowerCase();
-		const jjkNames = [
-			'jujutsu kaisen', 'jujutsu', 'kaisen', 'jjk',
-			'магическая битва', 'магическая', 'битва', 'джуцзу кайсен',
-			'呪術廻戦', '呪術回戦', 'じゅじゅつかいせん', 'じゅつかいせん',
-			'咒术回战', '呪術迴戰'
-		];
-		
-		for (const name of jjkNames) {
-			if (title.includes(name) || lowerTitle.includes(name.toLowerCase())) {
-				return true;
-			}
-		}
-		
-		return false;
-	}
-
-	// Получение сегментов пропуска
-	async function getSkipTimes(malId, episode) {
-		if (!malId || !episode) return [];
+	// Получение сегментов из AniSkip
+	async function getSkipTimes(episode) {
+		if (!episode || episode < 1) return [];
 		
 		// Кэширование
-		const cacheKey = `jjk_skip_${malId}_${episode}`;
+		const cacheKey = `jjk_skip_${JUJUTSU_KAISEN_MAL_ID}_${episode}`;
 		try {
 			const cached = localStorage.getItem(cacheKey);
 			if (cached) {
 				const data = JSON.parse(cached);
 				if (Date.now() - data.timestamp < 7 * 24 * 60 * 60 * 1000) {
-					log(`Using cached skip times for episode ${episode}`);
+					log(`Using cached segments for episode ${episode}`);
 					return data.segments;
 				}
 			}
 		} catch (e) {}
 		
-		log(`Requesting skip times for MAL ID ${malId}, episode ${episode}`);
+		log(`Requesting skip times for episode ${episode}`);
 		
 		try {
 			const types = SKIP_TYPES.map(t => `types[]=${t}`).join("&");
-			const url = `${ANISKIP_API}/${malId}/${episode}?${types}&episodeLength=0`;
+			const url = `${ANISKIP_API}/${JUJUTSU_KAISEN_MAL_ID}/${episode}?${types}&episodeLength=0`;
 			
 			const response = await fetch(url, {
-				headers: { 
-					"Accept": "application/json",
-					"User-Agent": "LampaAnimeSkip/2.0"
-				}
+				headers: { "Accept": "application/json" }
 			});
 			
 			if (response.status === 404) {
@@ -223,182 +240,169 @@
 			if (index !== -1) return index + 1;
 		}
 		
-		// Из названия
-		const title = videoParams.title || "";
-		const epMatch = title.match(/(\d+)/);
-		if (epMatch) return parseInt(epMatch[1]);
-		
+		// По умолчанию
 		return 1;
 	}
 
-	// Главная функция обработки
-	async function processJujutsuKaisen(videoParams, episodeNumber) {
-		const JUJUTSU_KAISEN_MAL_ID = 40748;
+	// Проверяем Jujutsu Kaisen по названию
+	function isJujutsuKaisen(title) {
+		if (!title) return false;
 		
-		log(`Processing Jujutsu Kaisen episode ${episodeNumber}`);
+		const lowerTitle = title.toLowerCase();
+		const jjkNames = [
+			'магическая битва', 'магическая', 'битва',
+			'jujutsu kaisen', 'jujutsu', 'kaisen', 'jjk',
+			'呪術廻戦', '呪術回戦', 'じゅじゅつかいせん'
+		];
 		
-		// Получаем сегменты
-		const segments = await getSkipTimes(JUJUTSU_KAISEN_MAL_ID, episodeNumber);
-		
-		if (segments.length > 0) {
-			// Ключевое изменение: используем новую функцию инъекции
-			const success = injectSkipSegments(videoParams, segments);
-			
-			if (success) {
-				log(`✅ SUCCESS: ${segments.length} skip segments injected`);
-				
-				// Дополнительно: сохраняем сегменты для других вызовов
-				window._lastSkipSegments = {
-					segments: segments,
-					timestamp: Date.now(),
-					episode: episodeNumber
-				};
-				
-				return true;
-			} else {
-				log(`❌ FAILED: Could not inject segments`);
-			}
-		} else {
-			log(`⚠️ No skip times found for episode ${episodeNumber}`);
-		}
-		
-		return false;
+		return jjkNames.some(name => 
+			title.includes(name) || lowerTitle.includes(name.toLowerCase())
+		);
 	}
 
-	// Основная функция
+	// Основная функция обработки
 	async function processVideo(videoParams) {
 		try {
 			// Определяем номер эпизода
 			const episode = extractEpisodeNumber(videoParams);
-			log(`Starting process for episode ${episode}`);
+			log(`Processing episode ${episode}`);
 			
-			// Проверяем карточку
-			let cardInfo = null;
-			try {
-				if (videoParams.card) cardInfo = videoParams.card;
-				else if (videoParams.movie) cardInfo = videoParams.movie;
-				else {
-					const active = Lampa.Activity.active();
-					cardInfo = active?.card || active?.movie;
-				}
-			} catch (e) {}
+			// Проверяем название
+			let title = "";
+			if (videoParams.card) title = videoParams.card.title || "";
+			else if (videoParams.movie) title = videoParams.movie.title || "";
 			
-			if (cardInfo) {
-				const title = cardInfo.title || cardInfo.original_title || cardInfo.original_name || "";
-				log(`Card title: "${title}"`);
-				
-				if (isJujutsuKaisenTitle(title)) {
-					log(`Confirmed Jujutsu Kaisen by title: "${title}"`);
+			if (title) {
+				log(`Video title: "${title}"`);
+				if (!isJujutsuKaisen(title)) {
+					log("Not Jujutsu Kaisen, skipping");
+					return;
 				}
 			}
 			
-			// Обрабатываем как Jujutsu Kaisen для эпизодов 1-24
-			if (episode >= 1 && episode <= 24) {
-				log(`Trying Jujutsu Kaisen for episode ${episode}`);
-				await processJujutsuKaisen(videoParams, episode);
+			// Получаем сегменты
+			const segments = await getSkipTimes(episode);
+			
+			if (segments.length > 0) {
+				// Инъекция сегментов
+				const success = injectSkipSegments(videoParams, segments);
+				
+				if (success) {
+					log(`✅ SUCCESS: ${segments.length} segments injected`);
+					
+					// Дополнительно: повторная попытка через 3 секунды
+					setTimeout(() => {
+						log("Retrying injection after delay...");
+						injectSkipSegments(videoParams, segments);
+					}, 3000);
+					
+				} else {
+					log(`⚠️ Injection may have failed`);
+				}
 			} else {
-				log(`Episode ${episode} outside JJK S1 range, skipping`);
+				log(`No skip segments found for episode ${episode}`);
 			}
 			
 		} catch (error) {
-			log(`Error: ${error.message}`);
+			log(`Processing error: ${error.message}`);
 		}
 	}
 
-	// Инициализация с правильным перехватом
-	function init() {
-		if (window.lampa_jjk_injected) return;
-		window.lampa_jjk_injected = true;
+	// Инициализация плагина
+	function initPlugin() {
+		if (window.lampa_jjk_plugin_loaded) return;
+		window.lampa_jjk_plugin_loaded = true;
 		
-		log("Jujutsu Kaisen Skip Plugin INIT");
+		log("Initializing Jujutsu Kaisen Skip Plugin");
 		
-		// Вариант 1: Перехват Player.play (как в оригинальном скрипте)
+		// ========== СПОСОБ 1: Перехват Player.play ==========
 		if (Lampa.Player && Lampa.Player.play) {
 			const originalPlay = Lampa.Player.play;
 			
 			Lampa.Player.play = function (videoParams) {
 				log("Player.play intercepted");
 				
-				// Запускаем обработку после небольшой задержки
+				// Вызываем оригинальный метод
+				const result = originalPlay.call(this, videoParams);
+				
+				// Запускаем обработку
 				setTimeout(() => {
 					processVideo(videoParams);
-				}, 1000);
+				}, 1500);
 				
-				// Вызываем оригинальный метод
-				return originalPlay.call(this, videoParams);
+				return result;
 			};
 			
-			log("Player.play interception successful");
+			log("✓ Player.play interception successful");
 		}
 		
-		// Вариант 2: Слушаем события плеера
-		document.addEventListener('player-video-start', function (e) {
-			log("Player video start event");
-			if (e.detail && e.detail.params) {
-				setTimeout(() => {
-					processVideo(e.detail.params);
-				}, 1500);
-			}
-		});
+		// ========== СПОСОБ 2: Мониторинг изменений ==========
+		let lastProcessedUrl = "";
 		
-		// Вариант 3: Периодическая проверка активного видео
-		let checkInterval = null;
-		let lastProcessedUrl = '';
-		
-		function checkActiveVideo() {
+		function monitorPlayer() {
 			try {
 				const activity = Lampa.Activity.active();
 				if (activity && activity.videoParams) {
-					const currentUrl = activity.videoParams.url || '';
+					const currentUrl = activity.videoParams.url || "";
 					if (currentUrl && currentUrl !== lastProcessedUrl) {
 						log(`New video detected: ${currentUrl.substring(0, 50)}...`);
 						lastProcessedUrl = currentUrl;
-						processVideo(activity.videoParams);
+						
+						setTimeout(() => {
+							processVideo(activity.videoParams);
+						}, 2000);
 					}
 				}
 			} catch (e) {}
 		}
 		
-		// Запускаем проверку каждые 3 секунды
-		checkInterval = setInterval(checkActiveVideo, 3000);
+		// Запускаем мониторинг
+		setInterval(monitorPlayer, 3000);
 		
-		// Глобальные методы для отладки
-		window.JJKSkipDebug = {
-			injectTestSegments: () => {
+		// ========== Отладочные функции ==========
+		window.JJKSkip = {
+			// Принудительная инъекция
+			inject: (episode) => {
+				log(`Manual injection for episode ${episode || 1}`);
+				getSkipTimes(episode || 1).then(segments => {
+					const activity = Lampa.Activity.active();
+					if (activity?.videoParams) {
+						injectSkipSegments(activity.videoParams, segments);
+					}
+				});
+			},
+			
+			// Тестовые сегменты
+			test: () => {
 				const testSegments = [
-					{ start: 85, end: 105, name: "Опенинг", type: "op" },
-					{ start: 1320, end: 1340, name: "Эндинг", type: "ed" }
+					{ start: 85, end: 105, name: "Тест опенинг", type: "op" },
+					{ start: 1320, end: 1340, name: "Тест эндинг", type: "ed" }
 				];
 				
 				const activity = Lampa.Activity.active();
 				if (activity?.videoParams) {
-					const success = injectSkipSegments(activity.videoParams, testSegments);
-					log(`Test injection: ${success ? 'SUCCESS' : 'FAILED'}`);
-				} else {
-					log("No active video for test");
+					injectSkipSegments(activity.videoParams, testSegments);
 				}
 			},
 			
-			forceInject: (episode) => {
-				const activity = Lampa.Activity.active();
-				if (activity?.videoParams) {
-					processJujutsuKaisen(activity.videoParams, episode || 1);
-				}
-			},
-			
-			checkPlayerAPI: () => {
-				log("=== Lampa Player API Check ===");
+			// Проверка API
+			checkAPI: () => {
+				log("=== Lampa API Check ===");
 				log(`Lampa.Player: ${!!Lampa.Player}`);
 				log(`Lampa.Player.listener: ${!!Lampa.Player?.listener}`);
-				log(`Lampa.Player.active(): ${!!Lampa.Player?.active()}`);
+				log(`Lampa.Activity: ${!!Lampa.Activity}`);
 				log(`Lampa.Activity.active(): ${!!Lampa.Activity?.active()}`);
+				log(`Lampa.Noty: ${!!Lampa.Noty}`);
+				log(`Lampa.Timeline: ${!!Lampa.Timeline}`);
 				
-				const activity = Lampa.Activity.active();
-				if (activity?.videoParams) {
-					log(`VideoParams segments: ${!!activity.videoParams.segments}`);
+				// Проверяем методы Player
+				if (Lampa.Player) {
+					const methods = Object.keys(Lampa.Player).filter(k => typeof Lampa.Player[k] === 'function');
+					log(`Player methods: ${methods.join(', ')}`);
 				}
 			},
 			
+			// Очистка кэша
 			clearCache: () => {
 				const keys = [];
 				for (let i = 0; i < localStorage.length; i++) {
@@ -408,19 +412,30 @@
 					}
 				}
 				keys.forEach(key => localStorage.removeItem(key));
-				log("JJK cache cleared");
+				log("Cache cleared");
+			},
+			
+			// Проверка сегментов
+			checkSegments: () => {
+				const activity = Lampa.Activity.active();
+				if (activity?.videoParams?.segments?.skip) {
+					log(`Current segments: ${JSON.stringify(activity.videoParams.segments.skip)}`);
+				} else {
+					log("No segments in videoParams");
+				}
 			}
 		};
 		
-		log("✅ Jujutsu Kaisen Skip Plugin fully initialized");
+		log("✅ Jujutsu Kaisen Skip Plugin ready");
 	}
 
-	// Запускаем когда Lampa готова
+	// Запуск плагина
 	if (window.Lampa && window.Lampa.Player) {
-		setTimeout(init, 2000); // Даем время на полную загрузку
+		// Ждем полной загрузки Lampa
+		setTimeout(initPlugin, 3000);
 	} else {
-		window.document.addEventListener("app_ready", function () {
-			setTimeout(init, 2000);
+		window.addEventListener('app_ready', () => {
+			setTimeout(initPlugin, 3000);
 		});
 	}
 

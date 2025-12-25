@@ -54,7 +54,6 @@
                 midtoneColor: 0x9d9d9d,
                 lowlightColor: 0x20202,
                 baseColor: 0x727272,
-                blurFactor: 0.53,
                 speed: 0.60,
                 zoom: 1.50
             },

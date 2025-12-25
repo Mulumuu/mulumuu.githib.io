@@ -14,9 +14,17 @@ var img = 'https://s3-us-west-2.amazonaws.com/s.cdpn.io/85280/smoke2.png';
 
 var smokeImage = new Image();
 smokeImage.src = img;
-smokeImage.crossOrigin = "anonymous";
+smokeImage.crossOrigin = "Anonymous"; // Для работы с CORS
 
-// Создаем canvas для Lampa
+// Создаем несколько вариаций текстуры дыма
+var smokeImages = [];
+for (var i = 0; i < 3; i++) {
+    var imgClone = new Image();
+    imgClone.src = img;
+    smokeImages.push(imgClone);
+}
+
+// Создаем canvas для эффектов
 var c = document.createElement('canvas');
 c.id = 'lampaSmoke';
 c.style.cssText = `

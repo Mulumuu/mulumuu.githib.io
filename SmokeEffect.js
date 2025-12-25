@@ -61,43 +61,42 @@ function initSmokeEffect() {
     }
     
     // Запускаем отрисовку
-    draw(new Date().getTime(), 3000, c, ctx);
+    draw(new Date().getTime(), 3000);
 }
 
-function addNewParticle(delay) {
-    var p = {};
-    
-    // Начинаем снизу экрана, но выше чем в оригинале
-    p.top = canvasHeight + 50;
-    
-    // Распределяем по всей ширине экрана с небольшим запасом
-    p.left = randBetween(-300, canvasWidth + 300);
-    
-    p.start = new Date().getTime() + delay;
-    p.life = 12000; // Увеличил время жизни
-    p.speedUp = 25; // Немного уменьшил скорость
-    
-    p.speedRight = randBetween(0, 20); // Добавил движение в обе стороны
-    
-    p.rot = randBetween(-1, 1); // Меньшее вращение
-    
-    // Более темные цвета для гармонии с темным фоном Lampa
-    p.red = Math.floor(randBetween(0,255));
-    p.blue = Math.floor(randBetween(0,255));
-    p.green = Math.floor(randBetween(0,255));
-    
-    p.startOpacity = 0.3; // Более прозрачный начальный уровень
-    
-    p.newTop = p.top;
-    p.newLeft = p.left;
-    p.size = 200; // Начальный размер
-    p.growth = 10; // Скорость роста
-    
-    pCollection[pCount] = p;
-    pCount++;
+function addNewParticle(delay)
+{
+
+  var p = {};
+  p.top = canvasHeight;
+  p.left = randBetween(-200,800);
+
+  p.start = new Date().getTime() + delay;
+  p.life = 8000;
+  p.speedUp = 30;
+
+
+  p.speedRight = randBetween(0,20);
+
+  p.rot = randBetween(-1,1);
+  p.red = Math.floor(randBetween(0,255));
+  p.blue = Math.floor(randBetween(0,255));
+  p.green = Math.floor(randBetween(0,255));
+
+
+  p.startOpacity = .3
+  p.newTop = p.top;
+  p.newLeft = p.left;
+  p.size = 200;
+  p.growth = 10;
+
+  pCollection[pCount] = p;
+  pCount++;
+
+
 }
 
-function draw(startT, totalT, canvas, ctx) {
+function draw(startT, totalT, canvas) {
     // Проверяем и обновляем размеры canvas если нужно
     if (canvasWidth !== window.innerWidth || canvasHeight !== window.innerHeight) {
         canvasWidth = window.innerWidth;
@@ -109,13 +108,6 @@ function draw(startT, totalT, canvas, ctx) {
     // Timing
     var timeDelta = new Date().getTime() - startT;
     var stillAlive = false;
-    
-    // Более мягкое очищение canvas для плавного эффекта
-    ctx.fillStyle = 'rgba(29, 31, 32, 0.08)'; // Цвет фона Lampa
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Используем режим смешивания для лучшего эффекта дыма
-    ctx.globalCompositeOperation = 'lighter';
     
     // Loop through particles
     for (var i = 0; i < pCount; i++) {    
@@ -131,67 +123,34 @@ function draw(startT, totalT, canvas, ctx) {
                 stillAlive = true; 
             }
             
-            // Создаем волнообразное движение
-            var waveOffset = Math.sin(td * 0.0005 + p.left * 0.001) * 10;
             
             // attributes that change over time
-            var newTop = p.top - (p.speedUp * (td / 1000)) + waveOffset;
-            var newLeft = p.left + (p.speedRight * (td / 1000));
-            
-            // Более плавное исчезновение
-            var newOpacity = Math.max(p.startOpacity * (1 - Math.pow(frac, 1.5)), 0);
+            var newTop = p.top - (p.speedUp * (td/1000));
+            var newLeft = p.left + (p.speedRight * (td/1000));
+            var newOpacity = Math.max(p.startOpacity * (1-frac),0);
             
             var newSize = p.size + (p.growth * (td / 1000));
             p.newTop = newTop;
             p.newLeft = newLeft;
             
-            // Draw! с сохранением/восстановлением контекста
-            ctx.save();
-            
             // Применяем цвет и прозрачность
-            ctx.fillStyle = 'rgba(' + p.red + ',' + p.green + ',' + p.blue + ',' + newOpacity + ')';      
-            ctx.globalAlpha = newOpacity;
+            ctx.fillStyle = 'rgba(150,150,150,' + newOpacity + ')';      
+            ctx.globalAlpha  = newOpacity;
+            ctx.drawImage(smokeImage, newLeft, newTop, newSize, newSize);      
             
-            // Добавляем вращение если нужно
-            if (p.rot !== 0) {
-                ctx.translate(newLeft + newSize/2, newTop + newSize/2);
-                ctx.rotate(p.rot * (td / 10000));
-                ctx.drawImage(smokeImage, -newSize/2, -newSize/2, newSize, newSize);
-                ctx.translate(-(newLeft + newSize/2), -(newTop + newSize/2));
-            } else {
-                ctx.drawImage(smokeImage, newLeft, newTop, newSize, newSize);
-            }
-            
-            ctx.restore();
-            
-            // Автоматически добавляем новые частицы для непрерывного эффекта
-            if (td > 0 && td < 500 && Math.random() < 0.05) {
-                addNewParticle(0);
-            }
+           
         }
-    }
-    
-    // Восстанавливаем режим смешивания
-    ctx.globalCompositeOperation = 'source-over';
-    
-    // Добавляем новые частицы периодически для непрерывного эффекта
-    if (Math.random() < 0.03) {
-        addNewParticle(0);
     }
     
     // Repeat if there's still a living particle
-    if (stillAlive) {
-        requestAnimationFrame(function(){
-            draw(startT, totalT, canvas, ctx);
-        }); 
-    } else {
-        // Если все частицы умерли, перезапускаем с новым пучком
-        console.log('Перезапуск эффекта дыма');
-        for (var i = 0; i < 1000; i++) {
-            addNewParticle(i * 30);
-        }
-        draw(new Date().getTime(), 3000, canvas, ctx);
-    }
+    if (stillAlive)
+  {
+    requestAnimationFrame(function(){draw(startT,totalT);}); 
+  }
+  else
+  {
+    clog(timeDelta + ": stopped");
+  }
 }
 
 function randBetween(n1, n2) {
@@ -223,12 +182,5 @@ window.addEventListener('resize', function() {
         smokeCanvas.height = canvasHeight;
     }
 });
-
-// Функция для периодического добавления новых пучков дыма
-setInterval(function() {
-    for (var i = 0; i < 500; i++) {
-        addNewParticle(i * 20);
-    }
-}, 5000);
 
 console.log('Инициализация эффекта дыма для Lampa...');

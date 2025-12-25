@@ -14,14 +14,28 @@ var img = 'https://s3-us-west-2.amazonaws.com/s.cdpn.io/85280/smoke2.png';
 
 var smokeImage = new Image();
 smokeImage.src = img;
-smokeImage.crossOrigin = "Anonymous"; // Для работы с CORS
+smokeImage.crossOrigin = "Anonymous";
 
-// Создаем несколько вариаций текстуры дыма
-var smokeImages = [];
-for (var i = 0; i < 3; i++) {
-    var imgClone = new Image();
-    imgClone.src = img;
-    smokeImages.push(imgClone);
+// Создаем backup текстуру на случай если proxy не сработает
+function createBackupTexture() {
+    var size = 256;
+    var canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    var ctx = canvas.getContext('2d');
+    
+    var gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+    gradient.addColorStop(0.3, 'rgba(220, 220, 220, 0.5)');
+    gradient.addColorStop(0.6, 'rgba(180, 180, 180, 0.2)');
+    gradient.addColorStop(1, 'rgba(140, 140, 140, 0)');
+    
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(size/2, size/2, size/2, 0, Math.PI * 2);
+    ctx.fill();
+    
+    return canvas.toDataURL();
 }
 
 // Создаем canvas для эффектов

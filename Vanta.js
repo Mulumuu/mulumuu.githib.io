@@ -54,7 +54,7 @@
                 midtoneColor: '#9d9d9d',
                 lowlightColor: '#020202',
                 baseColor: '#727272',
-                speed: 1.5,
+                speed: 0.0,
                 zoom: 0.8
             },
             
@@ -132,17 +132,14 @@
                 try {
                     this.vantaEffect = VANTA.FOG({
                         el: '#' + elementId,
-                        mouseControls: true,
-                        touchControls: true,
-                        gyroControls: false,
                         minHeight: 200.00,
                         minWidth: 200.00,
                         highlightColor: highlightColor,
                         midtoneColor: midtoneColor,
                         lowlightColor: lowlightColor,
                         baseColor: baseColor,
-                        speed: this.settings.speed,
-                        zoom: this.settings.zoom
+                        speed: -0.2,
+                        zoom: 0.8
                     });
                     
                     console.log('Vanta.js: Effect started successfully');
@@ -188,82 +185,6 @@
                     return;
                 }
                 
-                // Добавляем раздел настроек
-                Lampa.Settings.add({
-                    title: 'Vanta Background',
-                    group: 'vanta',
-                    items: [
-                        {
-                            component: 'checkbox',
-                            title: 'Включить анимированный фон',
-                            name: 'enabled',
-                            value: this.settings.enabled,
-                            onChange: (value) => {
-                                this.settings.enabled = value;
-                                this.applyBackground();
-                                this.saveSettings();
-                            }
-                        },
-                        {
-                            component: 'color',
-                            title: 'Основной цвет',
-                            name: 'baseColor',
-                            value: this.settings.baseColor,
-                            onChange: (value) => {
-                                this.settings.baseColor = value;
-                                this.applyBackground();
-                                this.saveSettings();
-                            }
-                        },
-                        {
-                            component: 'color',
-                            title: 'Цвет подсветки',
-                            name: 'highlightColor',
-                            value: this.settings.highlightColor,
-                            onChange: (value) => {
-                                this.settings.highlightColor = value;
-                                this.applyBackground();
-                                this.saveSettings();
-                            }
-                        },
-                        {
-                            component: 'slider',
-                            title: 'Скорость анимации',
-                            name: 'speed',
-                            value: this.settings.speed,
-                            min: 0.1,
-                            max: 3,
-                            step: 0.1,
-                            onChange: (value) => {
-                                this.settings.speed = value;
-                                this.applyBackground();
-                                this.saveSettings();
-                            }
-                        },
-                        {
-                            component: 'slider',
-                            title: 'Масштаб',
-                            name: 'zoom',
-                            value: this.settings.zoom,
-                            min: 0.1,
-                            max: 2,
-                            step: 0.1,
-                            onChange: (value) => {
-                                this.settings.zoom = value;
-                                this.applyBackground();
-                                this.saveSettings();
-                            }
-                        },
-                        {
-                            component: 'button',
-                            title: 'Сбросить настройки',
-                            name: 'reset',
-                            onChange: () => {
-                                this.resetSettings();
-                            }
-                        }
-                    ]
-                });
             },
             
             // Сохранение настроек
@@ -357,71 +278,10 @@
         // Экспортируем плагин
         window.VantaBackground = VantaBackground;
         
-        // Добавляем CSS стили
-        this.addCustomCSS();
+        
     }
     
-    // Добавление CSS стилей
-    function addCustomCSS() {
-        const style = document.createElement('style');
-        style.id = 'vanta-background-styles';
-        style.textContent = `
-            /* Улучшение читаемости контента поверх анимированного фона */
-            .wrap__content {
-                position: relative;
-                z-index: 1;
-                background: rgba(29, 31, 32, 0.7);
-                backdrop-filter: blur(1px);
-                min-height: 100vh;
-            }
-            
-            .wrap__left {
-                position: relative;
-                z-index: 1;
-                background: rgba(29, 31, 32, 0.95);
-            }
-            
-            .head {
-                position: relative;
-                z-index: 2;
-            }
-            
-            .activity {
-                position: relative;
-                z-index: 1;
-            }
-            
-            /* Плавное появление */
-            .background {
-                opacity: 1 !important;
-                transition: opacity 1s ease-in-out;
-            }
-            
-            /* Адаптивность для мобильных устройств */
-            @media (max-width: 768px) {
-                #vanta-background-* {
-                    min-height: 100vh !important;
-                }
-                
-                .wrap__content {
-                    background: rgba(29, 31, 32, 0.85);
-                }
-            }
-            
-            /* Отключение эффекта для слабых устройств */
-            @media (prefers-reduced-motion: reduce) {
-                .background {
-                    background: rgb(29, 31, 32) !important;
-                }
-                
-                .background canvas {
-                    display: none !important;
-                }
-            }
-        `;
-        
-        document.head.appendChild(style);
-    }
+    
     
     // Автоматическая проверка зависимостей и инициализация
     if (checkDependencies()) {

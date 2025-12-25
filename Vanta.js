@@ -1,4 +1,4 @@
-/*!
+/*1
  * Vanta.js Background Plugin for Lampa
  * Adds animated fog background using Vanta.js
  */

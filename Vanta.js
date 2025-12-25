@@ -50,12 +50,12 @@
             // Настройки по умолчанию
             settings: {
                 enabled: true,
-                highlightColor: 0xe0e0ed,
-                midtoneColor: 0x9d9d9d,
-                lowlightColor: 0x20202,
-                baseColor: 0x727272,
-                speed: 0.60,
-                zoom: 1.50
+                highlightColor: '#f0f0f0',
+                midtoneColor: '#cdcdcd',
+                lowlightColor: '#bbbbbb',
+                baseColor: '#919191',
+                speed: 1.5,
+                zoom: 0.8
             },
             
             // Ссылка на эффект Vanta

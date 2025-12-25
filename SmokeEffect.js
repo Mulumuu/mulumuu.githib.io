@@ -1,4 +1,4 @@
-//Тест
+//Тест1
 console.clear();
 
 // Сохраняем оригинальные параметры
@@ -10,7 +10,7 @@ pCollection = new Array();
 
 var puffs = 1;
 var particlesPerPuff = 2000;
-var img = 'https://s3-us-west-2.amazonaws.com/s.cdpn.io/85280/soke2.png'; // Исправленная ссылка
+var img = 'https://s3-us-west-2.amazonaws.com/s.cdpn.io/85280/smoke2.png';
 
 var smokeImage = new Image();
 smokeImage.src = img;

@@ -1,6 +1,6 @@
 /*1
  * Vanta.js Background Plugin for Lampa
- * Adds animated fog background using Vanta.js
+ * Static fog background using Vanta.js (animation stopped after first frame)
  */
 
 (function() {
@@ -32,7 +32,7 @@
 
     // Инициализация плагина
     function initPlugin() {
-        console.log('Vanta.js: Initializing background plugin...');
+        console.log('Vanta.js: Initializing static background plugin...');
         
         // Ждем пока Lampa полностью загрузится
         if (typeof Lampa === 'undefined') {
@@ -42,10 +42,10 @@
 
         // Создаем конфигурацию плагина
         const VantaBackground = {
-            name: 'Vanta Background',
-            version: '1.0.0',
+            name: 'Vanta Static Background',
+            version: '1.2.0',
             author: 'Lampa Community',
-            description: 'Анимированный фон с эффектом тумана',
+            description: 'Статичный фон с Vanta.js (анимация остановлена)',
             
             // Настройки по умолчанию
             settings: {
@@ -54,12 +54,11 @@
                 midtoneColor: '#9d9d9d',
                 lowlightColor: '#020202',
                 baseColor: '#727272',
-                speed: 0.0,
                 zoom: 0.8
             },
             
-            // Ссылка на эффект Vanta
             vantaEffect: null,
+            isAnimationStopped: false,
             
             // Инициализация
             init: function() {
@@ -94,13 +93,14 @@
                 background.innerHTML = '';
                 
                 // Устанавливаем ID для Vanta.js
-                background.id = 'vanta-background-' + Date.now();
+                const elementId = 'vanta-bg-' + Date.now();
+                background.id = elementId;
                 
                 // Применяем стили
                 this.applyStyles(background);
                 
-                // Запускаем Vanta.js эффект
-                this.startVantaEffect(background.id);
+                // Запускаем Vanta.js и останавливаем после первого кадра
+                this.startAndFreezeVanta(elementId);
             },
             
             // Применение стилей
@@ -113,47 +113,266 @@
                 element.style.zIndex = '-1';
                 element.style.pointerEvents = 'none';
                 element.style.background = 'rgb(29, 31, 32)';
-                element.style.transition = 'opacity 0.5s ease';
             },
             
-            // Запуск эффекта Vanta.js
-            startVantaEffect: function(elementId) {
+            // Запуск и заморозка Vanta эффекта
+            startAndFreezeVanta: function(elementId) {
                 // Если уже есть эффект, удаляем его
                 if (this.vantaEffect) {
-                    this.vantaEffect.destroy();
+                    try {
+                        this.vantaEffect.destroy();
+                    } catch(e) {}
+                    this.vantaEffect = null;
                 }
                 
-                // Конвертируем цвета из hex в 0x формат
-                const highlightColor = this.hexToThreeColor(this.settings.highlightColor);
-                const midtoneColor = this.hexToThreeColor(this.settings.midtoneColor);
-                const lowlightColor = this.hexToThreeColor(this.settings.lowlightColor);
-                const baseColor = this.hexToThreeColor(this.settings.baseColor);
+                this.isAnimationStopped = false;
                 
                 try {
+                    // Создаем Vanta эффект с нулевой скоростью
                     this.vantaEffect = VANTA.FOG({
                         el: '#' + elementId,
+                        mouseControls: false,
+                        touchControls: false,
+                        gyroControls: false,
                         minHeight: 200.00,
                         minWidth: 200.00,
-                        highlightColor: highlightColor,
-                        midtoneColor: midtoneColor,
-                        lowlightColor: lowlightColor,
-                        baseColor: baseColor,
-                        speed: -0.2,
-                        zoom: 0.8
+                        highlightColor: this.hexToThreeColor(this.settings.highlightColor),
+                        midtoneColor: this.hexToThreeColor(this.settings.midtoneColor),
+                        lowlightColor: this.hexToThreeColor(this.settings.lowlightColor),
+                        baseColor: this.hexToThreeColor(this.settings.baseColor),
+                        speed: 0, // Нулевая скорость
+                        zoom: this.settings.zoom
                     });
                     
-                    console.log('Vanta.js: Effect started successfully');
+                    console.log('Vanta.js: Effect created, waiting for first frame...');
+                    
+                    // Ждем завершения первого кадра и останавливаем анимацию
+                    this.stopAnimationAfterFirstFrame();
+                    
                 } catch (error) {
-                    console.error('Vanta.js: Failed to start effect:', error);
+                    console.error('Vanta.js: Failed to create effect:', error);
+                    this.createCanvasFallback();
                 }
+            },
+            
+            // Остановка анимации после первого кадра
+            stopAnimationAfterFirstFrame: function() {
+                if (!this.vantaEffect || this.isAnimationStopped) return;
+                
+                let frameCount = 0;
+                const maxFrames = 3; // Несколько кадров для инициализации
+                
+                // Сохраняем оригинальный метод рендера
+                const originalRender = this.vantaEffect.renderer ? this.vantaEffect.renderer.render : null;
+                
+                // Перехватываем метод рендера
+                if (this.vantaEffect.renderer && this.vantaEffect.renderer.render) {
+                    const self = this;
+                    const renderer = this.vantaEffect.renderer;
+                    
+                    renderer.render = function(scene, camera) {
+                        if (frameCount < maxFrames) {
+                            if (originalRender) {
+                                originalRender.call(this, scene, camera);
+                            }
+                            frameCount++;
+                            
+                            // После последнего кадра останавливаем все
+                            if (frameCount >= maxFrames && !self.isAnimationStopped) {
+                                self.freezeVantaAnimation();
+                            }
+                        }
+                        // Не вызываем оригинальный рендер после maxFrames
+                    };
+                }
+                
+                // Альтернативный метод: таймаут для остановки
+                setTimeout(() => {
+                    if (!this.isAnimationStopped) {
+                        this.freezeVantaAnimation();
+                    }
+                }, 500);
+            },
+            
+            // Заморозка анимации Vanta
+            freezeVantaAnimation: function() {
+                if (!this.vantaEffect || this.isAnimationStopped) return;
+                
+                console.log('Vanta.js: Freezing animation...');
+                
+                try {
+                    // 1. Останавливаем анимационный цикл Vanta
+                    if (this.vantaEffect.stop && typeof this.vantaEffect.stop === 'function') {
+                        this.vantaEffect.stop();
+                    }
+                    
+                    // 2. Отменяем requestAnimationFrame
+                    if (this.vantaEffect.animationFrameId) {
+                        cancelAnimationFrame(this.vantaEffect.animationFrameId);
+                        this.vantaEffect.animationFrameId = null;
+                    }
+                    
+                    // 3. Отключаем рендерер
+                    if (this.vantaEffect.renderer) {
+                        // Останавливаем анимацию рендерера
+                        this.vantaEffect.renderer.animation = null;
+                        
+                        // Отключаем автообновление сцены
+                        if (this.vantaEffect.scene) {
+                            this.vantaEffect.scene.autoUpdate = false;
+                        }
+                        
+                        // Очищаем функцию рендера
+                        this.vantaEffect.renderer.render = function() {};
+                    }
+                    
+                    // 4. Удаляем все обработчики анимации
+                    if (this.vantaEffect.onUpdate) {
+                        this.vantaEffect.onUpdate = null;
+                    }
+                    
+                    // 5. Устанавливаем флаг остановки
+                    this.isAnimationStopped = true;
+                    
+                    console.log('Vanta.js: Animation frozen successfully');
+                    
+                    // 6. Создаем снапшот для экономии памяти
+                    this.createVantaSnapshot();
+                    
+                } catch (error) {
+                    console.error('Vanta.js: Error freezing animation:', error);
+                }
+            },
+            
+            // Создание снапшота Vanta (конвертация в статичное изображение)
+            createVantaSnapshot: function() {
+                if (!this.vantaEffect || !this.vantaEffect.renderer) return;
+                
+                try {
+                    const renderer = this.vantaEffect.renderer;
+                    const canvas = renderer.domElement;
+                    
+                    if (canvas) {
+                        // Клонируем canvas для статичного изображения
+                        const staticCanvas = document.createElement('canvas');
+                        staticCanvas.width = canvas.width;
+                        staticCanvas.height = canvas.height;
+                        staticCanvas.style.cssText = canvas.style.cssText;
+                        
+                        // Копируем содержимое
+                        const ctx = staticCanvas.getContext('2d');
+                        ctx.drawImage(canvas, 0, 0);
+                        
+                        // Заменяем анимированный canvas на статичный
+                        const background = document.querySelector('.background');
+                        if (background) {
+                            const oldCanvas = background.querySelector('canvas');
+                            if (oldCanvas) {
+                                oldCanvas.remove();
+                            }
+                            background.appendChild(staticCanvas);
+                        }
+                        
+                        // Освобождаем память Vanta
+                        this.cleanupVantaMemory();
+                        
+                        console.log('Vanta.js: Snapshot created, Vanta memory freed');
+                    }
+                } catch (error) {
+                    console.error('Vanta.js: Error creating snapshot:', error);
+                }
+            },
+            
+            // Очистка памяти Vanta
+            cleanupVantaMemory: function() {
+                if (!this.vantaEffect) return;
+                
+                try {
+                    // Удаляем ссылки на Three.js объекты
+                    if (this.vantaEffect.renderer) {
+                        this.vantaEffect.renderer.dispose();
+                        this.vantaEffect.renderer.forceContextLoss();
+                        this.vantaEffect.renderer = null;
+                    }
+                    
+                    if (this.vantaEffect.scene) {
+                        // Очищаем сцену
+                        while(this.vantaEffect.scene.children.length > 0) { 
+                            this.vantaEffect.scene.remove(this.vantaEffect.scene.children[0]); 
+                        }
+                        this.vantaEffect.scene = null;
+                    }
+                    
+                    if (this.vantaEffect.camera) {
+                        this.vantaEffect.camera = null;
+                    }
+                    
+                    // Очищаем другие ссылки
+                    this.vantaEffect.material = null;
+                    this.vantaEffect.geometry = null;
+                    
+                    // Останавливаем сборщик мусора
+                    this.vantaEffect = null;
+                    
+                    if (window.performance && window.performance.memory) {
+                        console.log('Vanta.js: Memory cleaned up');
+                    }
+                    
+                } catch (error) {
+                    console.error('Vanta.js: Error cleaning memory:', error);
+                }
+            },
+            
+            // Fallback на Canvas если Vanta не работает
+            createCanvasFallback: function() {
+                console.log('Vanta.js: Using canvas fallback');
+                
+                const background = document.querySelector('.background');
+                if (!background) return;
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+                
+                // Создаем простой градиентный фон
+                const gradient = ctx.createRadialGradient(
+                    window.innerWidth / 2, window.innerHeight / 2, 0,
+                    window.innerWidth / 2, window.innerHeight / 2, 
+                    Math.max(window.innerWidth, window.innerHeight) / 2
+                );
+                
+                gradient.addColorStop(0, this.settings.highlightColor);
+                gradient.addColorStop(0.5, this.settings.midtoneColor);
+                gradient.addColorStop(1, this.settings.lowlightColor);
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                canvas.style.cssText = `
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 0;
+                `;
+                
+                background.appendChild(canvas);
             },
             
             // Удаление фона
             removeBackground: function() {
                 if (this.vantaEffect) {
-                    this.vantaEffect.destroy();
+                    try {
+                        this.vantaEffect.destroy();
+                    } catch(e) {}
                     this.vantaEffect = null;
                 }
+                
+                this.isAnimationStopped = false;
                 
                 const background = document.querySelector('.background');
                 if (background && background.dataset.originalContent) {
@@ -163,43 +382,33 @@
                 }
             },
             
-            // Конвертация цвета из hex в формат Three.js
+            // Конвертация цвета
             hexToThreeColor: function(hex) {
-                // Удаляем # если есть
                 hex = hex.replace('#', '');
-                
-                // Если короткая запись цвета
                 if (hex.length === 3) {
                     hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
                 }
-                
-                // Конвертируем в 0x формат
                 return parseInt('0x' + hex);
             },
             
-            // Добавление настроек в интерфейс Lampa
-            addSettings: function() {
-                // Проверяем доступность API настроек Lampa
-                if (typeof Lampa.Settings === 'undefined') {
-                    console.log('Vanta.js: Settings API not available');
-                    return;
+            // Обработка изменения размера окна
+            handleResize: function() {
+                if (this.vantaEffect && this.vantaEffect.resize) {
+                    // Пересоздаем эффект при изменении размера
+                    this.removeBackground();
+                    setTimeout(() => this.applyBackground(), 100);
                 }
-                
             },
             
-            // Сохранение настроек
-            saveSettings: function() {
-                try {
-                    localStorage.setItem('vanta_background_settings', JSON.stringify(this.settings));
-                } catch (error) {
-                    console.error('Vanta.js: Failed to save settings:', error);
-                }
+            // Добавление настроек
+            addSettings: function() {
+                // Можно добавить позже
             },
             
             // Загрузка настроек
             loadSettings: function() {
                 try {
-                    const saved = localStorage.getItem('vanta_background_settings');
+                    const saved = localStorage.getItem('vanta_frozen_settings');
                     if (saved) {
                         const parsed = JSON.parse(saved);
                         Object.assign(this.settings, parsed);
@@ -209,65 +418,26 @@
                 }
             },
             
-            // Сброс настроек
-            resetSettings: function() {
-                this.settings = {
-                    enabled: true,
-                    highlightColor: '#f0f0f0',
-                    midtoneColor: '#cdcdcd',
-                    lowlightColor: '#bbbbbb',
-                    baseColor: '#919191',
-                    speed: 1.5,
-                    zoom: 0.8
-                };
-                
-                this.saveSettings();
-                this.applyBackground();
-                
-                // Перезагружаем страницу настроек
-                if (Lampa.Settings && Lampa.Settings.update) {
-                    Lampa.Settings.update();
-                }
-            },
-            
             // Привязка событий
             bindEvents: function() {
-                // Обработка изменения размера окна
-                window.addEventListener('resize', () => {
-                    if (this.vantaEffect && this.vantaEffect.resize) {
-                        setTimeout(() => {
-                            this.vantaEffect.resize();
-                        }, 100);
-                    }
-                });
-                
-                // Обработка видимости страницы
-                document.addEventListener('visibilitychange', () => {
-                    if (document.hidden) {
-                        if (this.vantaEffect && this.vantaEffect.pause) {
-                            this.vantaEffect.pause();
-                        }
-                    } else {
-                        if (this.vantaEffect && this.vantaEffect.play) {
-                            this.vantaEffect.play();
-                        }
-                    }
-                });
+                const resizeHandler = () => this.handleResize();
+                window.addEventListener('resize', resizeHandler);
+                this.resizeHandler = resizeHandler;
             },
             
             // Деструктор
             destroy: function() {
                 this.removeBackground();
                 
-                // Удаляем обработчики событий
-                window.removeEventListener('resize', this.handleResize);
-                document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+                if (this.resizeHandler) {
+                    window.removeEventListener('resize', this.resizeHandler);
+                }
                 
                 console.log('Vanta.js: Plugin destroyed');
             }
         };
         
-        // Загружаем сохраненные настройки
+        // Загружаем настройки
         VantaBackground.loadSettings();
         
         // Инициализируем плагин
@@ -277,34 +447,11 @@
         
         // Экспортируем плагин
         window.VantaBackground = VantaBackground;
-        
-        
     }
-    
-    
     
     // Автоматическая проверка зависимостей и инициализация
     if (checkDependencies()) {
-        // Если зависимости уже загружены
         setTimeout(initPlugin, 1000);
     }
-    
-    // Экспорт для ручного управления
-    window.initVantaBackground = function() {
-        if (typeof VANTA !== 'undefined' && typeof VANTA.FOG !== 'undefined') {
-            initPlugin();
-        } else {
-            checkDependencies();
-        }
-    };
-    
-    // Дебаг функция
-    window.debugVantaBackground = function() {
-        console.log('Vanta Background Debug:');
-        console.log('- Vanta available:', typeof VANTA !== 'undefined');
-        console.log('- THREE available:', typeof THREE !== 'undefined');
-        console.log('- Background element:', document.querySelector('.background'));
-        console.log('- Current effect:', window.VantaBackground ? window.VantaBackground.vantaEffect : 'Not initialized');
-    };
     
 })();

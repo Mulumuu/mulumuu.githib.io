@@ -50,10 +50,10 @@
             // Настройки по умолчанию
             settings: {
                 enabled: true,
-                highlightColor: '#f0f0f0',
-                midtoneColor: '#cdcdcd',
-                lowlightColor: '#bbbbbb',
-                baseColor: '#919191',
+                highlightColor: '#E0E0E0',
+                midtoneColor: '#9d9d9d',
+                lowlightColor: '#020202',
+                baseColor: '#727272',
                 speed: 1.5,
                 zoom: 0.8
             },

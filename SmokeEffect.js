@@ -1,21 +1,23 @@
 console.clear();
 
 // Параметры для Lampa
-canvasWidth = window.innerWidth;
-canvasHeight = window.innerHeight;
+let canvasWidth = window.innerWidth;
+let canvasHeight = window.innerHeight;
 
-pCount = 0;
-pCollection = [];
+let pCount = 0;
+let pCollection = [];
+let particlesToAdd = [];
 
-var puffs = 2; // Увеличено количество волн
-var particlesPerPuff = 600; // Оптимальное количество для производительности
-var img = 'https://s3-us-west-2.amazonaws.com/s.cdpn.io/85280/smoke2.png';
+let puffs = 1; // Количество одновременных волн
+let particlesPerPuff = 400; // Частиц в одной волне
+let img = 'https://s3-us-west-2.amazonaws.com/s.cdpn.io/85280/smoke2.png';
 
-var smokeImage = new Image();
+let smokeImage = new Image();
+smokeImage.crossOrigin = "anonymous";
 smokeImage.src = img;
 
 // Создаем canvas для эффектов
-var c = document.createElement('canvas');
+let c = document.createElement('canvas');
 c.id = 'lampaSmoke';
 c.style.cssText = `
     position: fixed;
@@ -31,7 +33,11 @@ c.style.cssText = `
 // Вставляем в самый верх body
 document.body.appendChild(c);
 
-var ctx = c.getContext('2d');
+let ctx = c.getContext('2d');
+let lastPuffTime = 0;
+let puffInterval = 2000; // Интервал между запусками новых волн (2 секунды)
+let particlesPerSecond = 30; // Количество новых частиц в секунду
+let particleAccumulator = 0;
 
 // Адаптивные размеры
 function updateCanvasSize() {
@@ -45,38 +51,37 @@ updateCanvasSize();
 
 // Создаем backup текстуру
 function createBackupTexture() {
-    var size = 512; // Увеличено для лучшего качества
-    var canvas = document.createElement('canvas');
+    let size = 512;
+    let canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    var ctx = canvas.getContext('2d');
+    let ctx = canvas.getContext('2d');
     
-    // Создаем более плавный градиент для дыма
-    var gradient = ctx.createRadialGradient(
+    let gradient = ctx.createRadialGradient(
         size/2, size/2, size * 0.1,
         size/2, size/2, size/2
     );
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
-    gradient.addColorStop(0.1, 'rgba(240, 240, 240, 0.7)');
-    gradient.addColorStop(0.3, 'rgba(220, 220, 220, 0.4)');
-    gradient.addColorStop(0.6, 'rgba(200, 200, 200, 0.2)');
-    gradient.addColorStop(0.8, 'rgba(180, 180, 180, 0.1)');
-    gradient.addColorStop(1, 'rgba(160, 160, 160, 0)');
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+    gradient.addColorStop(0.2, 'rgba(240, 240, 240, 0.7)');
+    gradient.addColorStop(0.4, 'rgba(220, 220, 220, 0.4)');
+    gradient.addColorStop(0.7, 'rgba(200, 200, 200, 0.2)');
+    gradient.addColorStop(1, 'rgba(180, 180, 180, 0)');
     
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(size/2, size/2, size/2, 0, Math.PI * 2);
     ctx.fill();
     
-    // Добавляем легкую турбулентность
+    // Добавляем турбулентность
     ctx.globalCompositeOperation = 'overlay';
-    for (var i = 0; i < 5; i++) {
-        var x = size/2 + Math.random() * size * 0.4 - size * 0.2;
-        var y = size/2 + Math.random() * size * 0.4 - size * 0.2;
-        var r = size * (0.1 + Math.random() * 0.2);
+    for (let i = 0; i < 8; i++) {
+        let x = size/2 + Math.random() * size * 0.4 - size * 0.2;
+        let y = size/2 + Math.random() * size * 0.4 - size * 0.2;
+        let r = size * (0.15 + Math.random() * 0.25);
         
-        var gradient2 = ctx.createRadialGradient(x, y, 0, x, y, r);
-        gradient2.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
+        let gradient2 = ctx.createRadialGradient(x, y, 0, x, y, r);
+        gradient2.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+        gradient2.addColorStop(0.7, 'rgba(255, 255, 255, 0.1)');
         gradient2.addColorStop(1, 'rgba(255, 255, 255, 0)');
         
         ctx.fillStyle = gradient2;
@@ -88,180 +93,221 @@ function createBackupTexture() {
     return canvas;
 }
 
-var backupTexture = createBackupTexture();
+let backupTexture = createBackupTexture();
 
 // Ждем загрузки изображения
 smokeImage.onload = function() {
-    console.log('Изображение дыма загружено, создаем эффект...');
-    initializeParticles();
+    console.log('Изображение дыма загружено, запускаем бесконечный эффект...');
+    initializeContinuousEffect();
 };
 
 smokeImage.onerror = function() {
-    console.log('Не удалось загрузить изображение, используем backup текстуру');
-    initializeParticles();
+    console.log('Используем backup текстуру для эффекта дыма');
+    initializeContinuousEffect();
 };
 
-function initializeParticles() {
+function initializeContinuousEffect() {
     pCount = 0;
     pCollection = [];
+    particlesToAdd = [];
     
-    // Создаем частицы с увеличенным временем жизни
-    for (var i1 = 0; i1 < puffs; i1++) {
-        // Увеличенная задержка между волнами
-        var puffDelay = i1 * 3000; // 3 секунды между волнами
-
-        for (var i2 = 0; i2 < particlesPerPuff; i2++) {
-            // Увеличиваем задержку между частицами в волне
-            addNewParticle((i2 * 80) + puffDelay);    
-        }
+    // Создаем начальную порцию частиц
+    for (let i = 0; i < puffs; i++) {
+        createPuff(i * 500); // Смещаем начальные волны
     }
-
-    // Запускаем отрисовку
-    draw(new Date().getTime());
+    
+    // Запускаем бесконечную отрисовку
+    draw();
 }
 
-function addNewParticle(delay) {
-    var p = {};
+function createPuff(delay = 0) {
+    for (let i = 0; i < particlesPerPuff; i++) {
+        // Равномерно распределяем частицы во времени
+        let particleDelay = delay + (i * 1500 / particlesPerPuff);
+        addNewParticle(particleDelay);
+    }
+}
+
+function addNewParticle(delay = 0) {
+    let p = {};
     
-    // НАСТРОЙКА ПОЯВЛЕНИЯ ИЗ-ЗА НИЖНЕЙ ГРАНИЦЫ ЭКРАНА:
-    // Частицы начинают появляться ниже видимой области
-    p.top = canvasHeight + Math.random() * 200; // Ниже экрана на 0-200px
-    p.left = Math.random() * canvasWidth; // По всей ширине
+    // Начальная позиция - ниже экрана для эффекта появления снизу
+    p.top = canvasHeight + 50 + Math.random() * 150;
+    p.left = Math.random() * canvasWidth;
     
     p.start = new Date().getTime() + delay;
     
-    // УВЕЛИЧЕННОЕ ВРЕМЯ ЖИЗНИ:
-    // Базовое время жизни увеличено + случайное отклонение
-    p.life = 20000 + Math.random() * 15000; // 20-35 секунд
+    // ОЧЕНЬ долгое время жизни для непрерывного эффекта
+    p.life = 45000 + Math.random() * 30000; // 45-75 секунд
     
-    // Более плавное движение вверх
-    p.speedUp = 8 + Math.random() * 12; // 8-20 пикселей в секунду
+    // Медленное движение вверх
+    p.speedUp = 5 + Math.random() * 10; // 5-15 пикселей в секунду
     
     // Легкое движение в стороны
-    p.speedRight = -3 + Math.random() * 6; // -3 до +3 пикселей в секунду
+    p.speedRight = -2 + Math.random() * 4; // -2 до +2 пикселей в секунду
     
-    // Медленное вращение
-    p.rot = (Math.random() - 0.5) * 0.01; // -0.005 до +0.005 радиан в секунду
+    // Очень медленное вращение
+    p.rot = (Math.random() - 0.5) * 0.005; // -0.0025 до +0.0025 радиан в секунду
     
-    // Цвета для дыма (бело-серые оттенки)
-    p.red = Math.floor(220 + Math.random() * 35); // 220-255
-    p.blue = Math.floor(220 + Math.random() * 35); // 220-255
-    p.green = Math.floor(220 + Math.random() * 35); // 220-255
+    // Цвета для дыма
+    p.red = Math.floor(225 + Math.random() * 30);
+    p.blue = Math.floor(225 + Math.random() * 30);
+    p.green = Math.floor(225 + Math.random() * 30);
     
     // Начальная прозрачность
-    p.startOpacity = 0.15 + Math.random() * 0.25; // 0.15-0.4
+    p.startOpacity = 0.1 + Math.random() * 0.2;
     
     p.newTop = p.top;
     p.newLeft = p.left;
     
-    // Размер частиц - увеличиваем для более заметного эффекта
-    p.size = 120 + Math.random() * 180; // 120-300 пикселей
+    // Размер частиц
+    p.size = 100 + Math.random() * 200; // 100-300 пикселей
     
-    // Рост частиц со временем - замедляем
-    p.growth = 3 + Math.random() * 7; // 3-10 пикселей в секунду
+    // Медленный рост
+    p.growth = 2 + Math.random() * 5; // 2-7 пикселей в секунду
     
-    // Добавляем параметр для плавного появления
-    p.fadeInTime = 2000; // 2 секунды на появление
-    p.fadeOutTime = 5000; // 5 секунд на исчезновение
+    // Время для плавных переходов
+    p.fadeInTime = 3000; // 3 секунды на появление
+    p.fadeOutTime = 10000; // 10 секунд на исчезновение
     
-    pCollection[pCount] = p;
+    // ID частицы для управления
+    p.id = Date.now() + Math.random();
+    
+    pCollection.push(p);
     pCount++;
 }
 
-var animationId = null;
+// Функция для добавления новых частиц в реальном времени
+function spawnNewParticles(deltaTime) {
+    let currentTime = new Date().getTime();
+    
+    // Добавляем новые частицы с постоянной скоростью
+    particleAccumulator += particlesPerSecond * (deltaTime / 1000);
+    
+    while (particleAccumulator >= 1) {
+        addNewParticle();
+        particleAccumulator--;
+    }
+    
+    // Также создаем периодические волны
+    if (currentTime - lastPuffTime > puffInterval) {
+        createPuff();
+        lastPuffTime = currentTime;
+    }
+}
 
-function draw(startT) {
+// Функция для удаления старых частиц
+function cleanupOldParticles() {
+    let currentTime = new Date().getTime();
+    let newCollection = [];
+    
+    for (let i = 0; i < pCollection.length; i++) {
+        let p = pCollection[i];
+        let td = currentTime - p.start;
+        
+        // Оставляем только живые частицы
+        if (td < p.life) {
+            newCollection.push(p);
+        }
+    }
+    
+    pCollection = newCollection;
+    pCount = pCollection.length;
+}
+
+let lastFrameTime = 0;
+let animationId = null;
+
+function draw(timestamp) {
     if (animationId) {
         cancelAnimationFrame(animationId);
     }
     
-    animationId = requestAnimationFrame(function() {
-        drawFrame(startT);
+    animationId = requestAnimationFrame(function(currentTime) {
+        drawFrame(currentTime);
     });
 }
 
-function drawFrame(startT) {
+function drawFrame(currentTime) {
     updateCanvasSize();
     
-    var currentTime = new Date().getTime();
-    var stillAlive = false;
+    // Вычисляем deltaTime
+    let deltaTime = lastFrameTime ? currentTime - lastFrameTime : 16;
+    lastFrameTime = currentTime;
     
-    // Полупрозрачный фон для плавного исчезновения (слегка затемняем)
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
+    // Очищаем canvas с эффектом накопления
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.02)';
     ctx.fillRect(0, 0, c.width, c.height);
     
-    // Loop through particles
-    for (var i = 0; i < pCount; i++) {    
-        var p = pCollection[i];
-        var td = currentTime - p.start;
+    // Спавним новые частицы
+    spawnNewParticles(deltaTime);
+    
+    // Удаляем старые частицы
+    cleanupOldParticles();
+    
+    // Отрисовываем все частицы
+    for (let i = 0; i < pCount; i++) {    
+        let p = pCollection[i];
+        let td = currentTime - p.start;
         
-        if (td > 0) {
-            if (td <= p.life) { 
-                stillAlive = true; 
-            } else {
-                continue; // Пропускаем умершие частицы
-            }
+        if (td > 0 && td < p.life) {
+            // Расчет прогресса жизни
+            let lifeProgress = td / p.life;
             
-            // Расчет новых параметров с учетом времени жизни
-            var lifeProgress = td / p.life;
+            // Движение вверх
+            let newTop = p.top - (p.speedUp * (td/1000));
             
-            // Движение вверх с замедлением
-            var newTop = p.top - (p.speedUp * (td/1000));
             // Движение в стороны
-            var newLeft = p.left + (p.speedRight * (td/1000));
-            // Рост размера
-            var newSize = p.size + (p.growth * (td/1000));
+            let newLeft = p.left + (p.speedRight * (td/1000));
             
-            // Сложная кривая прозрачности для плавного появления и исчезновения
-            var newOpacity;
+            // Рост размера
+            let newSize = p.size + (p.growth * (td/1000));
+            
+            // Сложная кривая прозрачности
+            let newOpacity;
             
             if (td < p.fadeInTime) {
-                // Фаза появления: от 0 до startOpacity
+                // Фаза появления
                 newOpacity = p.startOpacity * (td / p.fadeInTime);
             } else if (td > p.life - p.fadeOutTime) {
-                // Фаза исчезновения: плавное затухание
-                var fadeProgress = (td - (p.life - p.fadeOutTime)) / p.fadeOutTime;
+                // Фаза исчезновения
+                let fadeProgress = (td - (p.life - p.fadeOutTime)) / p.fadeOutTime;
                 newOpacity = p.startOpacity * (1 - fadeProgress);
             } else {
-                // Основная фаза: постоянная прозрачность
-                newOpacity = p.startOpacity;
+                // Основная фаза с легким осцилляцией
+                let oscillation = Math.sin(td / 5000) * 0.1 + 0.9;
+                newOpacity = p.startOpacity * oscillation;
             }
             
-            // Дополнительное затухание на основе общего прогресса жизни
-            newOpacity *= (1 - lifeProgress * 0.3);
+            // Дополнительное плавное затухание
+            newOpacity *= (1 - lifeProgress * 0.5);
             
-            // Проверяем, видна ли частица на экране
-            if (newOpacity <= 0.01 || 
-                newTop < -newSize * 2 || // Даем запас для больших частиц
-                newLeft < -newSize * 2 || 
-                newLeft > c.width + newSize * 2) {
+            // Проверяем видимость
+            if (newOpacity <= 0.01 || newTop < -newSize * 3) {
                 continue;
             }
             
-            // Используем правильное изображение
-            var texture = smokeImage.complete ? smokeImage : backupTexture;
+            // Выбираем текстуру
+            let texture = smokeImage.complete ? smokeImage : backupTexture;
             
             // Рисуем частицу
             ctx.save();
             ctx.globalAlpha = Math.max(0, Math.min(1, newOpacity));
             
-            // Применяем цвет
+            // Применяем цветовой фильтр
             if (smokeImage.complete) {
-                // Для реального изображения используем фильтр
-                ctx.filter = `sepia(0.2) brightness(1.3) saturate(0.8)`;
-            } else {
-                // Для backup текстуры - белый дым
-                ctx.fillStyle = `rgba(${p.red}, ${p.green}, ${p.blue}, 0.8)`;
+                ctx.filter = `sepia(0.15) brightness(1.4) saturate(0.7)`;
             }
             
             // Позиционирование и вращение
             ctx.translate(newLeft, newTop);
             
-            // Медленное вращение с ускорением
-            var rotation = p.rot * (td/1000) * (1 + lifeProgress * 0.5);
+            // Вращение с возможным изменением направления
+            let rotation = p.rot * (td/1000);
+            if (p.id % 2 === 0) rotation *= -1; // Некоторые частицы вращаются в другую сторону
             ctx.rotate(rotation);
             
-            // Рисуем текстуру дыма
+            // Рисуем текстуру
             if (texture instanceof Image) {
                 ctx.drawImage(texture, -newSize/2, -newSize/2, newSize, newSize);
             } else {
@@ -272,26 +318,41 @@ function drawFrame(startT) {
         }
     }
     
-    // Продолжаем анимацию
-    if (stillAlive) {
-        animationId = requestAnimationFrame(function() {
-            drawFrame(startT);
-        });
-    } else {
-        console.log('Эффект завершен, перезапускаем...');
-        // Небольшая пауза перед перезапуском
-        setTimeout(initializeParticles, 2000);
-    }
+    // Продолжаем бесконечную анимацию
+    animationId = requestAnimationFrame(drawFrame);
 }
 
 // Обработчики изменения размера окна
 window.addEventListener('resize', function() {
     updateCanvasSize();
-    // Пересоздаем частицы при изменении размера с задержкой
-    setTimeout(initializeParticles, 300);
+    // Можно также масштабировать существующие частицы
+    for (let i = 0; i < pCollection.length; i++) {
+        let p = pCollection[i];
+        // Корректируем позицию при изменении размера окна
+        p.left = (p.left / canvasWidth) * window.innerWidth;
+        p.top = (p.top / canvasHeight) * window.innerHeight;
+    }
+    canvasWidth = window.innerWidth;
+    canvasHeight = window.innerHeight;
 });
 
-// Очистка при размонтировании
+// Функция для настройки параметров эффекта
+function updateEffectParameters(params) {
+    if (params.particlesPerSecond !== undefined) {
+        particlesPerSecond = params.particlesPerSecond;
+    }
+    if (params.puffInterval !== undefined) {
+        puffInterval = params.puffInterval;
+    }
+    if (params.opacity !== undefined) {
+        c.style.opacity = Math.max(0.1, Math.min(1, params.opacity));
+    }
+    if (params.puffs !== undefined) {
+        puffs = params.puffs;
+    }
+}
+
+// Очистка
 function cleanup() {
     if (animationId) {
         cancelAnimationFrame(animationId);
@@ -300,26 +361,43 @@ function cleanup() {
     if (c && c.parentNode) {
         c.parentNode.removeChild(c);
     }
+    pCollection = [];
+    pCount = 0;
 }
 
-// Автоматический запуск
-console.log('Эффект длительного дыма для Lampa инициализирован...');
+// Запуск эффекта сразу
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(initializeContinuousEffect, 1000);
+    });
+} else {
+    setTimeout(initializeContinuousEffect, 1000);
+}
 
-// Экспортируем функции для Lampa
+console.log('Бесконечный эффект дыма для Lampa инициализирован...');
+
+// Экспортируем API
 if (typeof window.Lampa !== 'undefined') {
     window.Lampa.SmokeEffect = {
-        init: initializeParticles,
+        init: initializeContinuousEffect,
         cleanup: cleanup,
+        update: updateEffectParameters,
         setIntensity: function(intensity) {
-            particlesPerPuff = Math.floor(400 * intensity);
-            puffs = Math.max(1, Math.floor(2 * intensity));
-            initializeParticles();
+            updateEffectParameters({
+                particlesPerSecond: Math.floor(20 * intensity),
+                puffInterval: 2000 / intensity,
+                puffs: Math.max(1, Math.floor(3 * intensity))
+            });
         },
         setOpacity: function(opacity) {
-            c.style.opacity = Math.max(0.3, Math.min(1, opacity));
+            c.style.opacity = Math.max(0.1, Math.min(1, opacity));
+        },
+        getStats: function() {
+            return {
+                activeParticles: pCount,
+                totalCreated: pCount + particlesToAdd.length,
+                canvasSize: { width: canvasWidth, height: canvasHeight }
+            };
         }
     };
 }
-
-// Запуск эффекта
-initializeParticles();
